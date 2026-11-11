@@ -1,0 +1,38 @@
+# ============================================================
+# 大盘监控系统 (Go) — 全局配置
+# ============================================================
+
+server:
+  addr: ":8080"              # Web 面板与 API 监听地址
+
+datasource:
+  primary: eastmoney         # 主数据源: eastmoney | sina
+  fallback: sina             # 备用数据源（主源失败时自动切换）
+
+database:
+  path: market.db            # SQLite 文件路径（相对项目根目录）
+
+# --- 监控的大盘指数 ---
+indices:
+  - secid: "1.000001"
+    name: "上证指数"
+  - secid: "0.399001"
+    name: "深证成指"
+  - secid: "0.399006"
+    name: "创业板指"
+  - secid: "1.000300"
+    name: "沪深300"
+  - secid: "1.000688"
+    name: "科创50"
+
+# --- 监控 ---
+monitoring:
+  check_interval_seconds: 60  # 轮询间隔（秒）
+  trading_hours_only: true    # 仅在交易时段告警（含集合竞价，北京时间）
+  alert:
+    change_pct: 1.0           # 涨跌幅超过 ±1% 告警
+    amplitude_pct: 1.5        # 当日振幅超过 1.5% 告警
+    cooldown_minutes: 30      # 同一指数同类告警冷却时间（分钟）
+
+logging:
+  level: INFO                 # DEBUG | INFO | WARNING | ERROR

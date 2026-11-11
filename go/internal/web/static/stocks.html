@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KILLER · A股个股</title>
+<link rel="stylesheet" href="/market.css">
+</head>
+<body>
+<header>
+  <h1>KILLER<span class="en">A股个股监控</span></h1>
+  <nav></nav>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <!-- 自选区 -->
+  <div class="panel">
+    <h2>自选监控 <span style="color:var(--muted);font-weight:400;font-size:12px">（涨跌幅超阈值自动告警，随大盘巡检 60s 一轮）</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>代码</th><th>名称</th><th>现价</th><th>涨跌幅</th><th>告警阈值</th><th class="nosort">操作</th>
+        </tr>
+      </thead>
+      <tbody id="watchBody"><tr><td colspan="6" class="loading">加载中 …</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- 全市场 -->
+  <div class="toolbar">
+    <input id="q" placeholder="输入代码筛选当前页（如 600519）" style="width:240px">
+    <select id="sort">
+      <option value="f3">按涨幅</option>
+      <option value="f3asc">按跌幅</option>
+      <option value="f6">按成交额</option>
+      <option value="f8">按换手率</option>
+      <option value="f20">按总市值</option>
+      <option value="f12">按代码</option>
+    </select>
+    <span style="color:var(--muted);font-size:12px">点击行加入/移出自选 · 30 秒刷新</span>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th>代码</th><th>名称</th><th>现价</th><th>涨跌幅</th><th>成交额</th><th>换手</th><th>市盈率</th><th>总市值</th>
+        </tr>
+      </thead>
+      <tbody id="body"><tr><td colspan="8" class="loading">加载中 …</td></tr></tbody>
+    </table>
+    <div class="pager">
+      <button id="prev">上一页</button>
+      <span id="pageInfo">—</span>
+      <button id="next">下一页</button>
+    </div>
+  </div>
+</main>
+
+<footer>数据来源：东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+
+<script src="/common.js"></script>
+<script>
+"use strict";
+const STATE = { page: 1, sort: "f3", asc: false, total: 0, stocks: [], watch: [], q: "" };
+
+// ---- 自选 ----
+async function loadWatch() {
+  try {
+    STATE.watch = await getJSON("/api/watch");
+    renderWatch();
+    renderStocks(); // 刷新星标状态
+  } catch (e) {
+    $("watchBody").innerHTML = `<tr><td colspan="6" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+function isWatched(secid) { return STATE.watch.some(w => w.secid === secid); }
+function renderWatch() {
+  if (!STATE.watch.length) {
+    $("watchBody").innerHTML = `<tr><td colspan="6" class="empty">暂无自选 — 点击下方列表任意一行加入</td></tr>`;
+    return;
+  }
+  $("watchBody").innerHTML = STATE.watch.map(w => {
+    const q = w.quote;
+    return `<tr data-secid="${w.secid}" data-act="remove">
+      <td>${w.code}</td>
+      <td>${w.name || (q ? q.name : "—")}</td>
+      <td>${q ? fmt(q.price) : "—"}</td>
+      <td class="${q ? cls(q.pct) : "flat"}">${q ? pctStr(q.pct) : "—"}</td>
+      <td>${w.threshold.toFixed(1)}%</td>
+      <td><span class="star on" title="移除">★</span></td>
+    </tr>`;
+  }).join("");
+}
+async function toggleWatch(stock) {
+  if (isWatched(stock.secid)) {
+    await fetch(`/api/watch?secid=${encodeURIComponent(stock.secid)}`, { method: "DELETE" });
+    toast(`已移出自选：${stock.name}`);
+  } else {
+    // 默认阈值：A股 7%，北交所/高波动放宽；用户可在告警后调整（后续版本做编辑）
+    const thr = stock.secid.startsWith("105.") || stock.secid.startsWith("106.") || stock.secid.startsWith("107.") ? 5 : 7;
+    await fetch("/api/watch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secid: stock.secid, code: stock.code, name: stock.name, threshold: thr })
+    });
+    toast(`已加入自选：${stock.name}（阈值 ${thr}%）`);
+  }
+  await loadWatch();
+}
+
+// ---- 全市场列表 ----
+async function loadStocks() {
+  $("body").innerHTML = `<tr><td colspan="8" class="loading">加载中 …</td></tr>`;
+  try {
+    const r = await getJSON(`/api/stocks?page=${STATE.page}&sort=${STATE.sort}&asc=${STATE.asc ? 1 : 0}`);
+    STATE.stocks = r.items;
+    STATE.total = r.total;
+    renderStocks();
+  } catch (e) {
+    $("body").innerHTML = `<tr><td colspan="8" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+function renderStocks() {
+  const q = STATE.q.trim();
+  const rows = STATE.stocks.filter(s => !q || s.code.includes(q) || s.name.includes(q));
+  $("pageInfo").textContent = `第 ${STATE.page} 页 / 共 ${Math.max(1, Math.ceil(STATE.total / 50))} 页 · ${STATE.total} 只`;
+  $("prev").disabled = STATE.page <= 1;
+  $("body").innerHTML = rows.map(s => `
+    <tr data-secid="${s.secid}">
+      <td>${isWatched(s.secid) ? '<span class="star on">★</span> ' : ""}${s.code}</td>
+      <td>${s.name}</td>
+      <td>${fmt(s.price)}</td>
+      <td class="${cls(s.pct)}">${pctStr(s.pct)}</td>
+      <td>${fmtAmt(s.amount)}</td>
+      <td>${fmt(s.turnover)}%</td>
+      <td>${s.pe > 0 ? fmt(s.pe, 1) : "—"}</td>
+      <td>${fmtCap(s.market_cap)}</td>
+    </tr>`).join("") || `<tr><td colspan="8" class="empty">本页无匹配</td></tr>`;
+}
+
+$("body").addEventListener("click", async e => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.dataset.secid) return;
+  const s = STATE.stocks.find(x => x.secid === tr.dataset.secid);
+  if (s) { await toggleWatch(s); loadStocks(); }
+});
+$("watchBody").addEventListener("click", async e => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.dataset.secid || tr.dataset.act !== "remove") return;
+  await fetch(`/api/watch?secid=${encodeURIComponent(tr.dataset.secid)}`, { method: "DELETE" });
+  toast("已移出自选");
+  await loadWatch();
+  loadStocks();
+});
+
+$("q").addEventListener("input", e => { STATE.q = e.target.value; renderStocks(); });
+$("sort").addEventListener("change", e => {
+  const v = e.target.value;
+  if (v === "f3asc") { STATE.sort = "f3"; STATE.asc = true; }
+  else { STATE.sort = v; STATE.asc = false; }
+  STATE.page = 1;
+  loadStocks();
+});
+$("prev").onclick = () => { if (STATE.page > 1) { STATE.page--; loadStocks(); } };
+$("next").onclick = () => {
+  if (STATE.page * 50 < STATE.total) { STATE.page++; loadStocks(); }
+};
+
+renderNav(NAV, "/stocks.html");
+startClock();
+loadWatch();
+loadStocks();
+setInterval(loadStocks, 30000);
+setInterval(loadWatch, 15000);
+</script>
+</body>
+</html>

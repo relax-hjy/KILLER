@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KILLER · A股板块</title>
+<link rel="stylesheet" href="/market.css">
+</head>
+<body>
+<header>
+  <h1>KILLER<span class="en">A股板块走势</span></h1>
+  <nav></nav>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <div class="stats" id="stats">加载中 …</div>
+
+  <div class="toolbar">
+    <div class="tabs">
+      <button id="tabIndustry" class="on">行业板块</button>
+      <button id="tabConcept">概念板块</button>
+    </div>
+    <div class="tabs">
+      <button id="sortDesc" class="on">领涨优先</button>
+      <button id="sortAsc">领跌优先</button>
+    </div>
+    <span style="color:var(--muted);font-size:12px">60 秒自动刷新</span>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th>板块</th>
+          <th>点位</th>
+          <th>涨跌幅</th>
+          <th style="width:220px">涨/跌家数</th>
+          <th class="nosort">热度</th>
+        </tr>
+      </thead>
+      <tbody id="body"><tr><td colspan="6" class="loading">加载中 …</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<footer>数据来源：东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+
+<script src="/common.js"></script>
+<script>
+"use strict";
+const STATE = { kind: "industry", sort: "pct_desc" };
+
+async function load() {
+  $("body").innerHTML = `<tr><td colspan="6" class="loading">加载中 …</td></tr>`;
+  try {
+    const boards = await getJSON(`/api/boards?kind=${STATE.kind}&sort=${STATE.sort}`);
+    render(boards);
+  } catch (e) {
+    $("body").innerHTML = `<tr><td colspan="6" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+function render(boards) {
+  // 统计：全市场涨跌分布（东财板块列表只返回前100，用返回集合统计并标注）
+  const up = boards.filter(b => b.pct > 0).length;
+  const dn = boards.filter(b => b.pct < 0).length;
+  const flat = boards.length - up - dn;
+  const top = boards.reduce((a, b) => b.pct > (a ? a.pct : -1e9) ? b : a, null);
+  const maxAbs = Math.max(...boards.map(b => Math.abs(b.pct)), 0.01);
+  $("stats").innerHTML =
+    `<span><b class="up">${up}</b>上涨</span>` +
+    `<span><b class="down">${dn}</b>下跌</span>` +
+    `<span><b class="flat">${flat}</b>平盘</span>` +
+    (top ? `<span>最强板块：<b class="${cls(top.pct)}">${top.name} ${pctStr(top.pct)}</b></span>` : "") +
+    `<span style="color:var(--muted)">共 ${boards.length} 个板块（按${STATE.sort === "pct_desc" ? "涨幅" : "跌幅"}排序）</span>`;
+
+  $("body").innerHTML = boards.map((b, i) => {
+    const w = Math.max(3, Math.round(Math.abs(b.pct) / maxAbs * 140));
+    const color = b.pct >= 0 ? "var(--up)" : "var(--down)";
+    return `<tr>
+      <td style="color:var(--muted)">${i + 1}</td>
+      <td>${b.name} <span style="color:var(--muted);font-size:11px">${b.secid}</span></td>
+      <td class="num">${fmt(b.price)}</td>
+      <td class="${cls(b.pct)}">${pctStr(b.pct)}</td>
+      <td>${b.up_count >= 0 ? `<span class="up">${b.up_count}</span> / <span class="down">${b.down_count}</span>` : "—"}</td>
+      <td><span class="heat-wrap"><span class="heat" style="width:${w}px;background:${color}"></span></span></td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="6" class="empty">暂无数据</td></tr>`;
+}
+
+function setTab(kind) {
+  STATE.kind = kind;
+  $("tabIndustry").classList.toggle("on", kind === "industry");
+  $("tabConcept").classList.toggle("on", kind === "concept");
+  load();
+}
+function setSort(sort) {
+  STATE.sort = sort;
+  $("sortDesc").classList.toggle("on", sort === "pct_desc");
+  $("sortAsc").classList.toggle("on", sort === "pct_asc");
+  load();
+}
+$("tabIndustry").onclick = () => setTab("industry");
+$("tabConcept").onclick = () => setTab("concept");
+$("sortDesc").onclick = () => setSort("pct_desc");
+$("sortAsc").onclick = () => setSort("pct_asc");
+
+renderNav(NAV, "/boards.html");
+startClock();
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

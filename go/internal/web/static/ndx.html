@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KILLER · 纳斯达克100</title>
+<link rel="stylesheet" href="/market.css">
+</head>
+<body>
+<header>
+  <h1>KILLER<span class="en">纳斯达克100 成分股</span></h1>
+  <nav></nav>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <div class="stats" id="stats">加载中 …</div>
+
+  <div class="toolbar">
+    <input id="q" placeholder="筛选代码/名称（如 AAPL / 苹果）" style="width:260px">
+    <select id="sort">
+      <option value="pct_desc">按涨幅</option>
+      <option value="pct_asc">按跌幅</option>
+      <option value="cap_desc">按总市值</option>
+      <option value="code">按代码</option>
+    </select>
+    <span style="color:var(--muted);font-size:12px">点击行查看个股日K详情 · 30 秒刷新</span>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:36px">#</th><th>代码</th><th>名称</th><th>现价</th>
+          <th>涨跌幅</th><th>今开</th><th>最高</th><th>最低</th><th>总市值</th>
+        </tr>
+      </thead>
+      <tbody id="body"><tr><td colspan="9" class="loading">加载中 …</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<!-- 个股详情抽屉 -->
+<div id="detail">
+  <span class="close" onclick="closeDetail()">✕</span>
+  <h2 id="dName">—</h2>
+  <div class="sub" id="dSub">—</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px" class="tabs">
+    <button id="dKline" class="on">日 K（120日）</button>
+    <button id="dIntraday">当日分时</button>
+  </div>
+  <canvas id="dChart"></canvas>
+  <div class="kpis" id="dKpis"></div>
+</div>
+
+<footer>数据来源：东方财富 + yfiua/index-constituents（成分表月度更新）· 仅供学习研究，不构成投资建议</footer>
+
+<script src="/common.js"></script>
+<script>
+"use strict";
+const STATE = { stocks: [], sort: "pct_desc", q: "", detail: null, detailTab: "kline" };
+
+async function load() {
+  try {
+    STATE.stocks = await getJSON("/api/ndx");
+    render();
+    renderStats();
+  } catch (e) {
+    $("body").innerHTML = `<tr><td colspan="9" class="empty">加载失败：${e.message}</td></tr>`;
+    $("stats").textContent = "";
+  }
+}
+
+function renderStats() {
+  const list = STATE.stocks;
+  const quoted = list.filter(s => s.price > 0);
+  const up = quoted.filter(s => s.pct > 0).length;
+  const dn = quoted.filter(s => s.pct < 0).length;
+  const top = quoted.reduce((a, b) => !a || b.pct > a.pct ? b : a, null);
+  const worst = quoted.reduce((a, b) => !a || b.pct < a.pct ? b : a, null);
+  $("stats").innerHTML =
+    `<span><b>${list.length}</b>只成分</span>` +
+    `<span><b class="up">${up}</b>上涨</span>` +
+    `<span><b class="down">${dn}</b>下跌</span>` +
+    (top ? `<span>领涨：<b class="up">${top.name} ${pctStr(top.pct)}</b></span>` : "") +
+    (worst ? `<span>领跌：<b class="down">${worst.name} ${pctStr(worst.pct)}</b></span>` : "");
+}
+
+function sorted() {
+  const q = STATE.q.trim().toLowerCase();
+  let list = STATE.stocks.filter(s =>
+    !q || s.code.toLowerCase().includes(q) || (s.name || "").toLowerCase().includes(q));
+  const by = {
+    pct_desc: (a, b) => b.pct - a.pct,
+    pct_asc: (a, b) => a.pct - b.pct,
+    cap_desc: (a, b) => b.market_cap - a.market_cap,
+    code: (a, b) => a.code.localeCompare(b.code),
+  }[STATE.sort];
+  return [...list].sort(by);
+}
+
+function render() {
+  const list = sorted();
+  $("body").innerHTML = list.map((s, i) => `
+    <tr data-secid="${s.secid}">
+      <td style="color:var(--muted)">${i + 1}</td>
+      <td><b>${s.code}</b></td>
+      <td>${s.name || "—"}</td>
+      <td>${s.price ? fmt(s.price) : "—"}</td>
+      <td class="${s.price ? cls(s.pct) : "flat"}">${s.price ? pctStr(s.pct) : "—"}</td>
+      <td>${s.open ? fmt(s.open) : "—"}</td>
+      <td>${s.high ? fmt(s.high) : "—"}</td>
+      <td>${s.low ? fmt(s.low) : "—"}</td>
+      <td>${fmtCap(s.market_cap)}</td>
+    </tr>`).join("") || `<tr><td colspan="9" class="empty">无匹配</td></tr>`;
+}
+
+// ---- 详情抽屉 ----
+$("body").addEventListener("click", e => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.dataset.secid) return;
+  const s = STATE.stocks.find(x => x.secid === tr.dataset.secid);
+  if (s) openDetail(s);
+});
+
+function openDetail(s) {
+  STATE.detail = s;
+  STATE.detailTab = "kline";
+  $("dKline").classList.add("on");
+  $("dIntraday").classList.remove("on");
+  $("dName").textContent = `${s.name || s.code} · ${s.code}`;
+  $("dSub").innerHTML = s.price
+    ? `现价 <span class="${cls(s.pct)}">${fmt(s.price)}（${pctStr(s.pct)}）</span>`
+    : "暂无行情（可能停牌）";
+  $("dKpis").innerHTML = [
+    ["今开", s.open], ["最高", s.high], ["最低", s.low],
+    ["昨收", s.prev_close], ["总市值", fmtCap(s.market_cap)],
+    ["涨跌额", s.change],
+  ].map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${typeof v === "number" ? fmt(v) : v}</div></div>`).join("");
+  $("detail").classList.add("open");
+  loadDetailChart();
+}
+function closeDetail() { $("detail").classList.remove("open"); STATE.detail = null; }
+
+async function loadDetailChart() {
+  const s = STATE.detail;
+  if (!s) return;
+  const path = STATE.detailTab === "kline" ? "kline" : "intraday";
+  try {
+    const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=120" : ""}`);
+    drawDetail(data);
+  } catch (e) {
+    const c = $("dChart"), ctx = setup(c);
+    ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("图表加载失败（" + e.message + "）", ctx.canvas.clientWidth / 2, 130);
+  }
+}
+
+function setup(c) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 500, h = 260;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function drawDetail(data) {
+  const c = $("dChart");
+  const ctx = setup(c);
+  const w = c.clientWidth, h = 260;
+  ctx.clearRect(0, 0, w, h);
+  const pts = data.map(d => ({ x: d.date, y: d.close }));
+  if (pts.length < 2) {
+    ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("暂无数据", w / 2, h / 2);
+    return;
+  }
+  const pad = { l: 8, r: 58, t: 12, b: 22 };
+  const ys = pts.map(p => p.y);
+  let min = Math.min(...ys), max = Math.max(...ys);
+  const span = (max - min) || 1;
+  const X = i => pad.l + (w - pad.l - pad.r) * i / (pts.length - 1);
+  const Y = v => pad.t + (h - pad.t - pad.b) * (1 - (v - min) / span);
+
+  ctx.strokeStyle = "#2c3743"; ctx.fillStyle = "#8b98a5"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+  for (let g = 0; g <= 4; g++) {
+    const v = min + span * g / 4, y = Y(v);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+    ctx.fillText(v.toFixed(1), w - pad.r + 5, y + 4);
+  }
+  const last = pts[pts.length - 1].y, first = pts[0].y;
+  ctx.strokeStyle = last >= first ? "#f0453e" : "#22ab71";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.y)) : ctx.moveTo(X(i), Y(p.y)));
+  ctx.stroke();
+
+  ctx.fillStyle = "#8b98a5"; ctx.textAlign = "left";
+  ctx.fillText(String(pts[0].x).slice(0, 10), pad.l, h - 6);
+  ctx.textAlign = "right";
+  ctx.fillText(String(pts[pts.length - 1].x).slice(0, 16).replace("T", " "), w - pad.r, h - 6);
+}
+
+$("dKline").onclick = () => {
+  STATE.detailTab = "kline";
+  $("dKline").classList.add("on"); $("dIntraday").classList.remove("on");
+  loadDetailChart();
+};
+$("dIntraday").onclick = () => {
+  STATE.detailTab = "intraday";
+  $("dIntraday").classList.add("on"); $("dKline").classList.remove("on");
+  loadDetailChart();
+};
+
+$("q").addEventListener("input", e => { STATE.q = e.target.value; render(); });
+$("sort").addEventListener("change", e => { STATE.sort = e.target.value; render(); });
+
+renderNav(NAV, "/ndx.html");
+startClock();
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

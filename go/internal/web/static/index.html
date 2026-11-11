@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KILLER · 大盘监控</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2129;
+    --panel2: #212a34;
+    --border: #2c3743;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --up: #f0453e;      /* A股：红涨 */
+    --down: #22ab71;    /* A股：绿跌 */
+    --flat: #8b98a5;
+    --accent: #3b82f6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header h1 .en { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 8px; }
+  .status { display: flex; gap: 16px; font-size: 13px; color: var(--muted); align-items: center; }
+  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--down); display: inline-block; margin-right: 6px; }
+  .status .dot.ok { background: var(--down); }
+  .status .dot.err { background: var(--up); }
+  .status .dot.off { background: var(--flat); }
+
+  main { padding: 20px 24px; max-width: 1280px; margin: 0 auto; }
+
+  /* 指数卡片 */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .card:hover, .card.active { border-color: var(--accent); }
+  .card .name { font-size: 14px; color: var(--muted); display: flex; justify-content: space-between; }
+  .card .name .code { font-size: 12px; }
+  .card .price { font-size: 28px; font-weight: 700; margin: 8px 0 4px; font-variant-numeric: tabular-nums; }
+  .card .delta { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .card .sub { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .flat { color: var(--flat); }
+
+  /* 图表区 */
+  .chartbox {
+    margin-top: 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .chartbox .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .chartbox .head h2 { font-size: 15px; font-weight: 600; }
+  .tabs button {
+    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
+    padding: 5px 14px; font-size: 13px; cursor: pointer;
+  }
+  .tabs button:first-child { border-radius: 6px 0 0 6px; }
+  .tabs button:last-child { border-radius: 0 6px 6px 0; }
+  .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  canvas { width: 100%; height: 300px; display: block; }
+
+  /* 告警表 */
+  .alerts { margin-top: 20px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .alerts h2 { font-size: 15px; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); text-align: center; padding: 24px; }
+  .badge { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+  .badge.change_up { background: rgba(240,69,62,.15); color: var(--up); }
+  .badge.change_down { background: rgba(34,171,113,.15); color: var(--down); }
+  .badge.amplitude { background: rgba(59,130,246,.15); color: var(--accent); }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KILLER<span class="en">Market Monitor · Go Edition</span></h1>
+  <div class="status">
+    <span id="tradeState"><span class="dot off"></span>—</span>
+    <span id="srcState">数据源: —</span>
+    <span id="errState"></span>
+    <span id="clock">—</span>
+  </div>
+</header>
+
+<nav style="display:flex;gap:4px;padding:10px 24px 0;max-width:1280px;margin:0 auto">
+  <a href="/" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#fff;background:#3b82f6">大盘监控</a>
+  <a href="/boards.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">A股板块</a>
+  <a href="/stocks.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">A股个股</a>
+  <a href="/us.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">美股</a>
+  <a href="/ndx.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">纳指100</a>
+</nav>
+
+<main>
+  <section class="cards" id="cards"></section>
+
+  <section class="chartbox">
+    <div class="head">
+      <h2 id="chartTitle">走势图</h2>
+      <div class="tabs">
+        <button id="tabIntraday" class="on" onclick="switchTab('intraday')">当日分时</button>
+        <button id="tabKline" onclick="switchTab('kline')">日 K（120日）</button>
+      </div>
+    </div>
+    <canvas id="chart"></canvas>
+  </section>
+
+  <section class="alerts">
+    <h2>告警记录 <span style="color:var(--muted);font-weight:400;font-size:12px">（涨跌幅 / 振幅阈值，含冷却）</span></h2>
+    <table>
+      <thead><tr><th>时间</th><th>指数</th><th>类型</th><th>触发值</th><th>阈值</th><th>点位</th></tr></thead>
+      <tbody id="alertBody"></tbody>
+    </table>
+    <div class="empty" id="alertEmpty" style="display:none">暂无告警 — 行情平稳 🎉</div>
+  </section>
+</main>
+
+<footer>数据来源：东方财富 / 新浪财经（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+
+<script>
+"use strict";
+const STATE = { secid: null, tab: "intraday", quotes: [] };
+
+const $ = id => document.getElementById(id);
+const cls = v => v > 0 ? "up" : (v < 0 ? "down" : "flat");
+const pctStr = v => (v > 0 ? "+" : "") + v.toFixed(2) + "%";
+const fmt = (v, d=2) => v == null ? "—" : Number(v).toFixed(d);
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + " → HTTP " + r.status);
+  return r.json();
+}
+
+/* ---------- 指数卡片 ---------- */
+function renderCards() {
+  const q = STATE.quotes;
+  if (!q.length) return;
+  if (!STATE.secid || !q.some(x => x.secid === STATE.secid)) STATE.secid = q[0].secid;
+  $("cards").innerHTML = q.map(x => `
+    <div class="card ${x.secid === STATE.secid ? "active" : ""}" onclick="selectCard('${x.secid}')">
+      <div class="name"><span>${x.name}</span><span class="code">${x.code}</span></div>
+      <div class="price ${cls(x.pct)}">${fmt(x.price)}</div>
+      <div class="delta ${cls(x.pct)}">${x.change >= 0 ? "+" : ""}${fmt(x.change)}　${pctStr(x.pct)}</div>
+      <div class="sub"><span>高 ${fmt(x.high)}</span><span>低 ${fmt(x.low)}</span><span>振幅 ${fmt(x.amplitude)}%</span></div>
+    </div>`).join("");
+}
+
+function selectCard(secid) {
+  if (secid === STATE.secid) return;
+  STATE.secid = secid;
+  renderCards();
+  drawChart(); // 数据未到位前显示"加载中"
+  loadCurrentTab().catch(e => {
+    $("errState").innerHTML = `<span style="color:var(--up)">⚠ ${e.message}</span>`;
+  });
+}
+
+// 立即按当前 tab 拉取选中指数的数据（不等 10 秒轮询）
+async function loadCurrentTab() {
+  if (STATE.tab === "intraday") await loadIntraday();
+  else await loadKline();
+  drawChart();
+}
+
+/* ---------- 图表 ---------- */
+let intradayData = [], klineData = [];
+let intradayFor = "", klineFor = "";  // 数据属于哪个 secid
+let loadSeq = 0;                      // 竞态序号：快速连点时丢弃过期响应
+
+async function loadIntraday() {
+  // 当日分时：直连数据源分钟 K（休市/重启后也能看全天）
+  const seq = ++loadSeq, secid = STATE.secid;
+  const data = await getJSON(`/api/intraday?secid=${secid}`);
+  if (seq !== loadSeq) return;        // 已有更新的请求发出，丢弃本次结果
+  intradayData = data; intradayFor = secid;
+}
+async function loadKline() {
+  const seq = ++loadSeq, secid = STATE.secid;
+  const data = await getJSON(`/api/kline?secid=${secid}&limit=120`);
+  if (seq !== loadSeq) return;
+  klineData = data; klineFor = secid;
+}
+
+function switchTab(tab) {
+  STATE.tab = tab;
+  $("tabIntraday").classList.toggle("on", tab === "intraday");
+  $("tabKline").classList.toggle("on", tab === "kline");
+  drawChart();
+}
+
+function setupCanvas() {
+  const c = $("chart"), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = 300;
+  c.width = w * dpr; c.height = h * dpr;
+  c.style.height = h + "px";
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+
+function drawChart() {
+  const { ctx, w, h } = setupCanvas();
+  ctx.clearRect(0, 0, w, h);
+  const title = STATE.tab === "intraday" ? "当日分时走势" : "日 K 收盘走势（120日）";
+  const cur = STATE.quotes.find(x => x.secid === STATE.secid);
+  $("chartTitle").textContent = (cur ? cur.name + " · " : "") + title;
+
+  if (STATE.tab === "intraday") {
+    // 数据属于其他指数（切换中）→ 显示加载中，避免闪旧图
+    if (intradayFor !== STATE.secid) {
+      drawLoading(ctx, w, h);
+      return;
+    }
+    drawLine(ctx, w, h, intradayData.map(d => ({ x: d.date, y: d.close })), cur);
+  } else {
+    if (klineFor !== STATE.secid) {
+      drawLoading(ctx, w, h);
+      return;
+    }
+    drawLine(ctx, w, h, klineData.map(d => ({ x: d.date, y: d.close })), null);
+  }
+}
+
+function drawLoading(ctx, w, h) {
+  ctx.fillStyle = "#8b98a5"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("加载中 …", w / 2, h / 2);
+}
+
+function drawLine(ctx, w, h, pts, cur) {
+  const pad = { l: 10, r: 64, t: 14, b: 24 };
+  if (pts.length < 2) {
+    ctx.fillStyle = "#8b98a5"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(STATE.tab === "intraday" ? "暂无分时数据（数据源可能未返回当日分钟线）" : "暂无K线数据", w/2, h/2);
+    return;
+  }
+  const ys = pts.map(p => p.y);
+  let min = Math.min(...ys), max = Math.max(...ys);
+  if (cur && STATE.tab === "intraday" && cur.prev_close) {
+    // 分时图以昨收为中轴（A股惯例）
+    min = Math.min(min, cur.prev_close); max = Math.max(max, cur.prev_close);
+  }
+  const span = (max - min) || 1;
+  const X = i => pad.l + (w - pad.l - pad.r) * i / (pts.length - 1);
+  const Y = v => pad.t + (h - pad.t - pad.b) * (1 - (v - min) / span);
+
+  // 网格 + 右侧刻度
+  ctx.strokeStyle = "#2c3743"; ctx.fillStyle = "#8b98a5"; ctx.font = "11px sans-serif";
+  ctx.textAlign = "left";
+  for (let g = 0; g <= 4; g++) {
+    const v = min + span * g / 4, y = Y(v);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+    ctx.fillText(v.toFixed(1), w - pad.r + 6, y + 4);
+  }
+  // 昨收中轴（分时）
+  if (cur && STATE.tab === "intraday" && cur.prev_close) {
+    ctx.setLineDash([4,4]); ctx.strokeStyle = "#8b98a5";
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(cur.prev_close)); ctx.lineTo(w - pad.r, Y(cur.prev_close)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 折线
+  const last = pts[pts.length - 1].y;
+  const first = pts[0].y;
+  const base = (cur && STATE.tab === "intraday" && cur.prev_close) ? cur.prev_close : first;
+  ctx.strokeStyle = last > base ? "#f0453e" : (last < base ? "#22ab71" : "#8b98a5");
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.y)) : ctx.moveTo(X(i), Y(p.y)));
+  ctx.stroke();
+
+  // X 轴首尾标签
+  ctx.fillStyle = "#8b98a5"; ctx.textAlign = "left";
+  ctx.fillText(String(pts[0].x).slice(5, 16).replace("T", " "), pad.l, h - 6);
+  ctx.textAlign = "right";
+  ctx.fillText(String(pts[pts.length-1].x).slice(5, 16).replace("T", " "), w - pad.r, h - 6);
+}
+
+/* ---------- 告警 ---------- */
+const TYPE_LABEL = { change_up: "涨幅超限", change_down: "跌幅超限", amplitude: "振幅超限" };
+function renderAlerts(list) {
+  $("alertEmpty").style.display = list.length ? "none" : "block";
+  $("alertBody").innerHTML = list.map(a => `
+    <tr>
+      <td class="num">${new Date(a.triggered_at).toLocaleString("zh-CN", {hour12:false})}</td>
+      <td>${a.name}</td>
+      <td><span class="badge ${a.type}">${TYPE_LABEL[a.type] || a.type}</span></td>
+      <td class="num ${a.type === 'change_down' ? 'down' : 'up'}">${pctStr(a.value)}</td>
+      <td class="num">${a.threshold.toFixed(2)}%</td>
+      <td class="num">${fmt(a.price)}</td>
+    </tr>`).join("");
+}
+
+/* ---------- 状态 ---------- */
+function renderStatus(s) {
+  const trading = s.trading_hours;
+  $("tradeState").innerHTML = `<span class="dot ${trading ? "ok" : "off"}"></span>${trading ? "交易时段" : "休市"}`;
+  $("srcState").textContent = `数据源: ${s.primary}` + (s.fallback ? ` → ${s.fallback}` : "");
+  $("errState").innerHTML = s.last_error
+    ? `<span style="color:var(--up)">⚠ ${s.last_error}</span>` : "";
+}
+
+/* ---------- 轮询 ---------- */
+async function refresh() {
+  try {
+    STATE.quotes = await getJSON("/api/quotes");
+    renderCards();
+    // 刷新当前 tab 数据（loadXxx 内部有 seq 竞态保护，过期响应会被丢弃）
+    if (STATE.tab === "intraday") { await loadIntraday(); drawChart(); }
+    const [alerts, status] = await Promise.all([getJSON("/api/alerts?n=50"), getJSON("/api/status")]);
+    renderAlerts(alerts);
+    renderStatus(status);
+  } catch (e) {
+    $("errState").innerHTML = `<span style="color:var(--up)">⚠ ${e.message}</span>`;
+  }
+  $("clock").textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+}
+
+async function init() {
+  await refresh();
+  setInterval(refresh, 10000);
+  setInterval(async () => {   // K线低频刷新即可
+    if (STATE.tab === "kline") { try { await loadKline(); drawChart(); } catch {} }
+  }, 60000);
+  window.addEventListener("resize", drawChart);
+  // tab 切换：数据不属于当前指数才需要拉（加载中由 drawChart 兜底显示）
+  const origSwitch = switchTab;
+  window.switchTab = async t => {
+    origSwitch(t);
+    try {
+      if (t === "kline" && klineFor !== STATE.secid) await loadKline();
+      if (t === "intraday" && intradayFor !== STATE.secid) await loadIntraday();
+      drawChart();
+    } catch (e) { console.error(e); }
+  };
+}
+init();
+</script>
+</body>
+</html>

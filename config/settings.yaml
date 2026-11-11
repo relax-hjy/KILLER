@@ -1,0 +1,42 @@
+# ============================================================
+# 基金筛选与监控系统 — 全局配置
+# ============================================================
+
+# --- 数据源 ---
+datasource:
+  primary: akshare           # 主数据源: akshare | tushare
+  fallback: eastmoney        # 备用数据源: eastmoney | baostock
+  tushare_token: ""          # Tushare Pro Token（使用 tushare 时填写）
+
+# --- 数据库 ---
+database:
+  url: sqlite:///funds.db    # SQLite 文件路径（相对于项目根目录）
+
+# --- 筛选条件 ---
+screening:
+  fund_types:                # 基金类型（空列表 = 全部）
+    - 混合型
+    - 股票型
+    - 债券型
+    - 货币型
+    - QDII
+  min_scale: 1.0             # 最小规模（亿元）
+  max_drawdown_limit: 0.20   # 最大回撤上限（20%）
+  return_periods:            # 考察周期
+    - 1月
+    - 3月
+    - 6月
+    - 1年
+
+# --- 监控 ---
+monitoring:
+  check_interval_minutes: 30 # 检查间隔（分钟）
+  alert:                     # 告警阈值
+    daily_change_pct: 2.0    # 日涨跌幅超过 ±2% 告警
+    weekly_change_pct: 5.0   # 周涨跌幅超过 ±5% 告警
+
+# --- 日志 ---
+logging:
+  level: INFO                # DEBUG | INFO | WARNING | ERROR
+  dir: logs                  # 日志目录
+  retention: 7               # 保留天数
