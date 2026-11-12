@@ -31,8 +31,10 @@ main { padding: 20px 24px; max-width: 1440px; margin: 0 auto; }
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
 }
 .card .name { font-size: 14px; color: var(--muted); display: flex; justify-content: space-between; }
+.card .name .code { font-size: 12px; }
 .card .price { font-size: 26px; font-weight: 700; margin: 8px 0 4px; font-variant-numeric: tabular-nums; }
 .card .delta { font-size: 14px; font-variant-numeric: tabular-nums; }
+.card .sub { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
 
 .up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--flat); }
 

@@ -9,16 +9,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Index 定义一个被监控的大盘指数。
+// Index 定义一个被监控的标的（大盘指数或板块）。
 type Index struct {
-	SecID string `yaml:"secid"` // 东方财富 secid：1.xxxxxx=上交所 0.xxxxxx=深交所
+	SecID string `yaml:"secid"` // 东方财富 secid：1.xxxxxx=上交所 0.xxxxxx=深交所 90.BKxxxx=板块
 	Name  string `yaml:"name"`  // 显示名称
 }
 
 // AlertConfig 告警阈值配置。
 type AlertConfig struct {
-	ChangePct      float64 `yaml:"change_pct"`      // 涨跌幅阈值（%）
-	AmplitudePct   float64 `yaml:"amplitude_pct"`   // 振幅阈值（%）
+	ChangePct      float64 `yaml:"change_pct"`       // 指数涨跌幅阈值（%）
+	AmplitudePct   float64 `yaml:"amplitude_pct"`    // 当日振幅阈值（%）
+	BoardChangePct float64 `yaml:"board_change_pct"` // 板块涨跌幅阈值（%），<=0 时沿用 change_pct
 	CooldownMin    int     `yaml:"cooldown_minutes"` // 同类告警冷却（分钟）
 }
 
@@ -41,8 +42,9 @@ type Config struct {
 	Database struct {
 		Path string `yaml:"path"`
 	} `yaml:"database"`
-	Indices    []Index           `yaml:"indices"`
-	Monitoring MonitoringConfig  `yaml:"monitoring"`
+	Indices    []Index          `yaml:"indices"`
+	Boards     []Index          `yaml:"boards"`
+	Monitoring MonitoringConfig `yaml:"monitoring"`
 	Logging    struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`
@@ -60,10 +62,17 @@ func Default() *Config {
 		{SecID: "0.399001", Name: "深证成指"},
 		{SecID: "0.399006", Name: "创业板指"},
 	}
+	c.Boards = []Index{
+		{SecID: "90.BK1128", Name: "CPO概念"},
+		{SecID: "90.BK0877", Name: "PCB"},
+		{SecID: "90.BK1137", Name: "存储芯片"},
+		{SecID: "90.BK1134", Name: "算力概念"},
+		{SecID: "90.BK1326", Name: "半导体设备"},
+	}
 	c.Monitoring = MonitoringConfig{
 		CheckIntervalSec: 60,
 		TradingHoursOnly: true,
-		Alert:            AlertConfig{ChangePct: 1.0, AmplitudePct: 1.5, CooldownMin: 30},
+		Alert:            AlertConfig{ChangePct: 1.0, AmplitudePct: 1.5, BoardChangePct: 2.0, CooldownMin: 30},
 	}
 	c.Logging.Level = "INFO"
 	return c

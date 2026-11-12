@@ -1,6 +1,11 @@
 # 构建产物
 go/killer.exe
 *.exe
+*.exe~
+*_new.exe~
+
+# 运行日志
+*.log
 
 # 运行时数据库（启动自动重建；funds.db 为 Python 版历史数据，纳入版本库）
 market.db

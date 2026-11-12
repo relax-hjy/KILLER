@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"sort"
@@ -53,9 +54,8 @@ func sinaGet(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("sina HTTP %d", resp.StatusCode)
 	}
-	buf := make([]byte, 8<<20)
-	n, _ := resp.Body.Read(buf)
-	return buf[:n], nil
+	// ReadAll 而非单次 Read：个股列表等大响应会因 TCP 分段截断
+	return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 }
 
 func gbkToUTF8(b []byte) []byte {

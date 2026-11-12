@@ -79,17 +79,17 @@ func (e *EastmoneySource) FetchQuotes(ctx context.Context, secids []string) ([]m
 	for _, d := range root.Data.Diff {
 		secid := secidOf(d.F13, d.F12)
 		q := model.Quote{
-			SecID:     secid,
-			Code:      d.F12,
-			Name:      d.F14,
-			Price:     d.F2,
-			Change:    d.F4,
-			Pct:       d.F3,
-			Open:      d.F17,
-			High:      d.F15,
-			Low:       d.F16,
-			PrevClose: d.F18,
-			Volume:    d.F5,
+			SecID:      secid,
+			Code:       d.F12,
+			Name:       d.F14,
+			Price:      d.F2,
+			Change:     d.F4,
+			Pct:        d.F3,
+			Open:       d.F17,
+			High:       d.F15,
+			Low:        d.F16,
+			PrevClose:  d.F18,
+			Volume:     d.F5,
 			UpdateTime: now,
 		}
 		if d.F18 > 0 {
@@ -162,10 +162,7 @@ func (e *EastmoneySource) fetchKline(ctx context.Context, secid string, klt, lim
 	return out, nil
 }
 
-// secidOf 拼装 secid：1=沪 0=深。
+// secidOf 拼装 secid「市场号.代码」：0/1=沪深，90=板块，105/106/107=美股。
 func secidOf(market int, code string) string {
-	if market == 1 {
-		return "1." + code
-	}
-	return "0." + code
+	return fmt.Sprintf("%d.%s", market, code)
 }

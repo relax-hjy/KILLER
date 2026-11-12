@@ -28,7 +28,7 @@ go/
   internal/
     config/           # YAML 配置加载
     model/            # Quote / Kline / Alert 数据结构
-    source/           # eastmoney（主）、sina（备）数据源
+    source/           # eastmoney / sina / tencent 数据源 + 路由治理（datasource.go）
     store/            # SQLite 存储（quote_snap、alert 两张表）
     monitor/          # 看门狗：轮询、阈值比对、冷却、交易时段
     web/              # HTTP API + 内嵌单页面板（static/）

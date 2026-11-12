@@ -1,7 +1,8 @@
 // Package source 实现大盘行情数据源。
 //
 // 主源 eastmoney（push2 接口，实测返回干净 JSON），
-// 备源 sina（hq.sinajs.cn，GBK 编码，主源失败时自动切换）。
+// 备源 sina（hq.sinajs.cn，GBK 编码，主源失败时自动切换），
+// 批量行情首选 tencent（qt.gtimg.cn，A股/美股/指数通吃）。
 package source
 
 import (
@@ -30,6 +31,8 @@ func New(name string) (Source, error) {
 		return &EastmoneySource{}, nil
 	case "sina":
 		return &SinaSource{}, nil
+	case "tencent":
+		return &TencentSource{}, nil
 	default:
 		return nil, fmt.Errorf("未知数据源: %s", name)
 	}

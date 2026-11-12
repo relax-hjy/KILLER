@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KILLER · 数据源</title>
+<link rel="stylesheet" href="/market.css">
+<style>
+.src-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px,1fr)); gap: 14px; margin-bottom: 22px; }
+.src-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; position: relative; }
+.src-card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.src-card h3 { font-size: 16px; }
+.badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.badge.ok { background: rgba(34,171,113,.15); color: var(--down); }
+.badge.down { background: rgba(240,69,62,.15); color: var(--up); }
+.badge.unknown { background: rgba(139,152,165,.15); color: var(--muted); }
+.src-card .desc { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.src-card .latency { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.src-card .latency b { color: var(--text); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.tag { background: var(--panel2); border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+.tag.mine { color: #93c5fd; border-color: #3b82f6; }
+.src-card .err { color: var(--up); font-size: 12px; margin-bottom: 8px; word-break: break-all; }
+.src-card button {
+  background: var(--accent); color: #fff; border: none; padding: 7px 18px;
+  font-size: 13px; border-radius: 6px; cursor: pointer;
+}
+.src-card button:disabled { opacity: .5; cursor: default; }
+table select { background: var(--panel2); color: var(--text); border: 1px solid var(--border); padding: 5px 8px; font-size: 13px; border-radius: 6px; }
+.src-chip { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 4px; margin-right: 4px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+.locked { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KILLER<span class="en">数据源联通性</span></h1>
+  <nav></nav>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <!-- 数据源卡片 -->
+  <div class="toolbar">
+    <strong style="font-size:15px">数据源状态</strong>
+    <button id="testAll" style="background:var(--accent);color:#fff;border:none;padding:7px 18px;font-size:13px;border-radius:6px;cursor:pointer">全部测试连接</button>
+    <span id="testedAt" style="color:var(--muted);font-size:12px">未测试</span>
+  </div>
+  <div class="src-cards" id="srcCards"><div class="src-card loading">加载中 …</div></div>
+
+  <!-- 功能路由 -->
+  <div class="panel">
+    <h2>功能数据源路由 <span style="color:var(--muted);font-weight:400;font-size:12px">（选择各功能优先使用的数据源，失败自动切换；改动即时生效并持久化）</span></h2>
+    <table>
+      <thead>
+        <tr><th>功能</th><th style="text-align:left">支持的数据源</th><th style="text-align:left">当前使用</th></tr>
+      </thead>
+      <tbody id="routeBody"><tr><td colspan="3" class="loading">加载中 …</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>说明</h2>
+    <div style="padding:14px 16px;color:var(--muted);font-size:13px;line-height:1.9">
+      · <b>连通状态</b>：探测各数据源的轻量接口（6 秒超时），页面打开自动测一次，之后 60 秒内用缓存；「测试连接」立即重测。<br>
+      · <b>路由生效范围</b>：行情/板块/列表/批量行情失败时按所选顺序切换；「当日分时」「美股活跃榜」「成分表」只有单一来源，锁定不可改。<br>
+      · <b>美股日 K 特例</b>：新浪接口仅支持 sh/sz 代码，纳指详情的日 K 始终走东财，与路由设置无关。<br>
+      · 路由设置存数据库（setting 表），重启服务自动恢复。
+    </div>
+  </div>
+</main>
+
+<footer>数据来源：东方财富 / 新浪财经 / 腾讯财经 / GitHub Pages · 仅供学习研究，不构成投资建议</footer>
+
+<script src="/common.js"></script>
+<script>
+"use strict";
+const STATE = { data: null };
+
+// 单源测试：只探测被点击的那个数据源，其余状态原样返回
+async function testOne(id) {
+  const data = await (await fetch("/api/datasources/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  })).json();
+  if (!data || !Array.isArray(data.sources)) {
+    throw new Error("响应结构异常（缺少 sources）");
+  }
+  STATE.data = data;
+  render();
+}
+
+async function load(force) {
+  try {
+    const url = force ? "/api/datasources/test" : "/api/datasources";
+    const opt = force ? { method: "POST" } : undefined;
+    const data = await (await fetch(url, opt)).json();
+    // 结构校验：测试接口与 GET 返回同结构，防御性拦截避免整个页面被错误覆盖
+    if (!data || !Array.isArray(data.sources)) {
+      throw new Error("响应结构异常（缺少 sources）");
+    }
+    STATE.data = data;
+    render();
+  } catch (e) {
+    // 不清空卡片/按钮，仅提示错误，保留上一次成功渲染的状态
+    toast("加载失败：" + e.message);
+    if (!STATE.data) {
+      $("srcCards").innerHTML = `<div class="src-card empty">加载失败：${e.message}</div>`;
+    }
+  }
+}
+
+function render() {
+  const d = STATE.data;
+  const status = d.status || {};
+  const routing = d.routing || {};
+  const names = Object.fromEntries((d.features || []).map(f => [f.key, f.label]));
+
+  // 数据源卡片
+  $("srcCards").innerHTML = d.sources.map(s => {
+    const st = status[s.id];
+    const cls2 = !st ? "unknown" : (st.ok ? "ok" : "down");
+    const label = !st ? "未测试" : (st.ok ? "联通" : "断开");
+    const lat = st && st.ok ? `延迟 <b>${st.latency_ms}ms</b>` : "";
+    const at = st ? new Date(st.checked_at).toLocaleTimeString("zh-CN", { hour12: false }) : "";
+    const err = st && !st.ok ? `<div class="err">⚠ ${st.error}</div>` : "";
+    // 该源当前被哪些功能使用
+    const usedBy = Object.entries(routing).filter(([, v]) => v === s.id).map(([k]) => names[k] || k);
+    const tags = s.features.map(f =>
+      `<span class="tag ${routing[f] === s.id ? "mine" : ""}">${names[f] || f}</span>`).join("");
+    return `<div class="src-card">
+      <div class="head"><h3>${s.name}</h3><span class="badge ${cls2}">${label}</span></div>
+      <div class="desc">${s.desc}</div>
+      <div class="latency">${lat}　${at ? "检测于 " + at : ""}</div>
+      ${err}
+      <div class="tags">${tags}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">当前承担：${usedBy.length ? usedBy.join("、") : "无"}</div>
+      <button data-src="${s.id}">测试连接</button>
+    </div>`;
+  }).join("");
+
+  document.querySelectorAll("#srcCards button[data-src]").forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = "测试中 …";
+      try {
+        await testOne(btn.dataset.src);   // 只测这一个
+      } catch (e) {
+        toast("测试失败：" + e.message);
+      } finally {
+        // render() 已重建按钮（恢复可点），失败时手动恢复
+        const b = document.querySelector(`#srcCards button[data-src="${btn.dataset.src}"]`);
+        if (b) { b.disabled = false; b.textContent = "测试连接"; }
+      }
+    };
+  });
+
+  // 路由表
+  $("routeBody").innerHTML = d.features.map(f => {
+    const locked = f.sources.length <= 1;
+    const cur = routing[f.key] || f.sources[0];
+    const chips = f.sources.map(id => {
+      const sm = d.sources.find(x => x.id === id);
+      return `<span class="src-chip">${sm ? sm.name : id}</span>`;
+    }).join("");
+    const ctl = locked
+      ? `<span class="locked">🔒 ${(d.sources.find(x => x.id === cur) || {}).name || cur}（唯一来源，不可切换）</span>`
+      : `<select data-feat="${f.key}">${f.sources.map(id => {
+          const sm = d.sources.find(x => x.id === id);
+          return `<option value="${id}" ${id === cur ? "selected" : ""}>${sm ? sm.name : id}</option>`;
+        }).join("")}</select>`;
+    return `<tr>
+      <td>${f.label}</td>
+      <td style="text-align:left">${chips}</td>
+      <td style="text-align:left">${ctl}</td>
+    </tr>`;
+  }).join("");
+
+  document.querySelectorAll("#routeBody select").forEach(sel => {
+    sel.onchange = async () => {
+      const feat = sel.dataset.feat;
+      try {
+        const r = await fetch("/api/datasources/routing", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ routing: { [feat]: sel.value } }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        toast(`「${names[feat]}」已切换为 ${sel.options[sel.selectedIndex].text}，即时生效`);
+        await load(false);
+      } catch (e) {
+        toast("保存失败：" + e.message);
+        await load(false);
+      }
+    };
+  });
+
+  const times = Object.values(status).map(s => s.checked_at).sort();
+  $("testedAt").textContent = times.length
+    ? "最近检测：" + new Date(times[times.length - 1]).toLocaleTimeString("zh-CN", { hour12: false })
+    : "未测试";
+}
+
+$("testAll").onclick = async () => {
+  $("testAll").disabled = true;
+  $("testAll").textContent = "测试中 …";
+  try { await load(true); }
+  finally { $("testAll").disabled = false; $("testAll").textContent = "全部测试连接"; }
+};
+
+renderNav(NAV, "/datasource.html");
+startClock();
+load(false);
+</script>
+</body>
+</html>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -50,9 +51,12 @@ func (s *SinaSource) FetchQuotes(ctx context.Context, secids []string) ([]model.
 		return nil, fmt.Errorf("sina HTTP %d", resp.StatusCode)
 	}
 
-	buf := make([]byte, 1<<20)
-	n, _ := resp.Body.Read(buf)
-	raw := buf[:n]
+	// ReadAll 而非单次 Read：大响应（多 symbol/长K线）会因 TCP 分段截断
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("sina 读取响应失败: %w", err)
+	}
+	raw := body
 	// GBK → UTF-8（纯 ASCII 部分不受影响）
 	if decoded, err := gbkDecoder.Bytes(raw); err == nil {
 		raw = decoded
@@ -61,7 +65,7 @@ func (s *SinaSource) FetchQuotes(ctx context.Context, secids []string) ([]model.
 	now := time.Now()
 	var out []model.Quote
 	for _, m := range sinaLineRe.FindAllStringSubmatch(string(raw), -1) {
-		symbol := m[2]      // 如 sh000001
+		symbol := m[2] // 如 sh000001
 		fields := strings.Split(m[3], ",")
 		if len(fields) < 6 {
 			continue
@@ -86,12 +90,15 @@ func (s *SinaSource) FetchQuotes(ctx context.Context, secids []string) ([]model.
 	return out, nil
 }
 
+// sinaKlineBar 日K单条。新浪 OHLCV 可能为数字或字符串
+// （2026-11-12 实测 scale=240 返回字符串 "3682.037"，ma_* 仍为数字）→ 统一 flexF。
 type sinaKlineBar struct {
-	Day   string  `json:"day"`
-	Open  float64 `json:"open"`
-	High  float64 `json:"high"`
-	Low   float64 `json:"low"`
-	Close float64 `json:"close"`
+	Day    string `json:"day"`
+	Open   flexF  `json:"open"`
+	High   flexF  `json:"high"`
+	Low    flexF  `json:"low"`
+	Close  flexF  `json:"close"`
+	Volume flexF  `json:"volume"`
 }
 
 // FetchKline 新浪日 K（scale=240 即日线）。
@@ -115,24 +122,28 @@ func (s *SinaSource) FetchKline(ctx context.Context, secid string, limit int) ([
 	}
 	defer resp.Body.Close()
 
-	buf := make([]byte, 8<<20)
-	n, _ := resp.Body.Read(buf)
-	body := string(buf[:n])
+	// ReadAll 而非单次 Read：limit=120 的日K响应会因 TCP 分段截断
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, fmt.Errorf("sina 读取响应失败: %w", err)
+	}
+	text := string(body)
 
 	// 提取 jsonp 括号内的数组
-	start := strings.Index(body, "[")
-	end := strings.LastIndex(body, "]")
+	start := strings.Index(text, "[")
+	end := strings.LastIndex(text, "]")
 	if start < 0 || end <= start {
 		return nil, fmt.Errorf("sina K线响应格式异常")
 	}
 	var bars []sinaKlineBar
-	if err := json.Unmarshal([]byte(body[start:end+1]), &bars); err != nil {
+	if err := json.Unmarshal([]byte(text[start:end+1]), &bars); err != nil {
 		return nil, fmt.Errorf("sina K线解析失败: %w", err)
 	}
 	out := make([]model.Kline, 0, len(bars))
 	for _, b := range bars {
 		out = append(out, model.Kline{
-			Date: b.Day, Open: b.Open, Close: b.Close, High: b.High, Low: b.Low,
+			Date: b.Day, Open: float64(b.Open), Close: float64(b.Close),
+			High: float64(b.High), Low: float64(b.Low), Volume: float64(b.Volume),
 		})
 	}
 	return out, nil

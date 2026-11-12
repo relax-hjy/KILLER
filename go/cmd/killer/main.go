@@ -25,7 +25,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
-	log.Printf("[Main] 配置加载完成: %s (指数 %d 个)", *cfgPath, len(cfg.Indices))
+	log.Printf("[Main] 配置加载完成: %s (指数 %d 个, 板块 %d 个)", *cfgPath, len(cfg.Indices), len(cfg.Boards))
 
 	st, err := store.Open(cfg.Database.Path)
 	if err != nil {
@@ -33,6 +33,9 @@ func main() {
 	}
 	defer st.Close()
 	log.Printf("[Main] 数据库: %s", cfg.Database.Path)
+
+	// 从 DB 恢复数据源路由（需在看门狗启动前生效）
+	web.LoadRouting(st)
 
 	wd, err := monitor.New(cfg, st)
 	if err != nil {

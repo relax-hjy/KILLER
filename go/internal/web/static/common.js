@@ -60,4 +60,5 @@ const NAV = [
   { href: "/stocks.html", label: "A股个股" },
   { href: "/us.html", label: "美股" },
   { href: "/ndx.html", label: "纳指100" },
+  { href: "/datasource.html", label: "数据源" },
 ];

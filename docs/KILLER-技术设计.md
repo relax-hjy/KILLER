@@ -12,7 +12,7 @@ cmd/killer/main.go ── 装配
         │
         ├── monitor.Watchdog ── 定时轮询（time.Ticker）
         │       │  拉行情 → 快照落库 → 阈值比对 → 冷却判断 → 告警落库
-        │       └── source 接口：eastmoney（主）→ 失败自动切 sina（备）
+        │       └── source 接口：按功能路由（eastmoney/sina 双源互备，失败自动切换）
         │
         └── web.Server ── net/http（Go 1.22+ 路由模式）
                 ├── /api/* JSON 接口（读 store + watchdog 内存态）
@@ -62,6 +62,12 @@ cmd/killer/main.go ── 装配
 | added_at | INTEGER | Unix 秒 |
 | notes | TEXT | 备注 |
 
+### setting（键值设置）
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| key | TEXT PK | 设置键（如 `routing`） |
+| value | TEXT | JSON 值；`routing` 存功能→数据源映射，启动时恢复到内存 |
+
 ### 内存结构（model 包）
 - `Quote`：指数实时行情（含振幅，供告警）
 - `Kline`：日 K / 分时分钟线（date/open/close/high/low/volume）
@@ -97,7 +103,21 @@ cmd/killer/main.go ── 装配
 | GET | /api/ndx | 纳指100 成分+批量行情（成分缓存 6h，行情 10s） |
 | GET/POST/DELETE | /api/watch[?secid=] | 自选个股增删查（附最新行情） |
 
-前端页面：`/`（大盘）、`/boards.html`、`/stocks.html`、`/us.html`、`/ndx.html`，统一导航 market.css + common.js。
+### 数据源治理模块（2026-11-12 新增）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /api/datasources | 数据源清单 + 8 功能能力矩阵 + 当前路由 + 连通状态（60s 缓存，过期自动重测） |
+| POST | /api/datasources/test | 测试连接：空 body 并行探测全部 4 源；`{"id":x}` 只探测指定源（其余状态原样返回）；两种均返回与 GET 同构的完整数据 |
+| GET | /api/datasources/routing | 当前功能→数据源映射 |
+| POST | /api/datasources/routing | 更新路由：校验源是否支持该功能（非法 400）→ 内存热生效 → setting 表持久化 |
+
+**路由机制**：`source` 包维护路由表（RWMutex 保护，可热更新），各功能入口（看门狗指数行情、板块/个股/批量行情包装函数、日 K handler）按 `pairFor(feature)` 得到「首选→备选」顺序依次尝试。单一来源功能（当日分时/美股活跃榜/成分表）锁定；美股日 K 因新浪 `getKLineData` 仅支持 sh/sz 而固定东财。启动时 `web.LoadRouting` 从 setting 表恢复。
+
+**默认路由**（2026-11-12 东财 push2 全挂后调整，`Features[].Sources[0]` 即默认首选）：日K/板块/个股 → 新浪，批量行情 → 腾讯，指数行情 quotes → 东财（90.BK 板块行情仅东财可报价，换源会让看门狗板块监控哑掉），当日分时/美股活跃榜 → 东财锁定，成分表 → yfiua。
+
+**能力矩阵**（实测边界）：东财 = 除成分表外全部（2026-11-12 实测 push2 连接失败，降为兜底）；新浪 = 指数行情/日K/板块/个股列表/批量行情（无分钟分时、无美股列表、无 100.* 指数、无 90.BK 板块行情）；腾讯 = 批量行情首选（A股/美股/ETF/100.* 指数通吃，无板块/个股列表；行情/分时/K线三方法已实现待接线 server.go）；yfiua = 仅纳指100成分。
+
+前端页面：`/`（大盘）、`/boards.html`、`/stocks.html`、`/us.html`、`/ndx.html`、`/datasource.html`（数据源看板），统一导航 market.css + common.js。
 
 ## 模块依赖
 
@@ -105,8 +125,8 @@ cmd/killer/main.go ── 装配
 cmd/killer → config, monitor, store, web
 monitor     → config, model, source, store
 web         → cache, config, model, monitor(只读), source, store
-source      → model（东财主源 + 新浪兜底 + NDX 成分外部源）
-store       → model
+source      → model（东财 + 新浪 + 腾讯三源 + NDX 成分外部源 + 路由/探测治理）
+store       → model（含 setting 表：路由持久化）
 cache       → （无依赖，TTL 缓存，保护上游接口）
 config / model → （无内部依赖）
 ```
@@ -122,22 +142,28 @@ config / model → （无内部依赖）
   - `amplitude`：振幅 ≥ amplitude_pct（默认 1.5%，按 (high-low)/prev_close 计）
 - **冷却**：同 secid + 同类型，距上次告警 < cooldown（默认 30min）则跳过（查 alert 表）
 - **交易时段**：`trading_hours_only=true` 时仅在北京时间周一至五 9:15–11:35 / 13:00–15:05 触发告警（快照照常落库）；时区加载失败兜底 UTC+8
-- **容灾**：主源失败记入 `last_error` 并切备源；备源新浪 s_ 接口无开高低昨收，振幅置 0（尽力而为）
+- **容灾**：各功能按路由「首选→备选」依次尝试，首选失败记日志并切下一源；备源新浪 s_ 接口无开高低昨收，振幅置 0（尽力而为）
 - **自选个股巡检**（2026-11-11 新增）：每轮随大盘巡检一并检查 `watch_stock`，|涨跌幅| ≥ 个股独立阈值 → `stock_change_up/down` 告警，冷却与指数共用（同 secid+类型）
 
 ## 技术约束
 - 禁止 CGO：必须保持 `go build` 免 C 编译器（驱动选型已保证）
 - 单进程单写者：SQLite 连接数固定为 1，避免 SQLITE_BUSY
-- 免费公开接口：东财/新浪均无 SLA，需容灾与降级，接口结构变动需先 curl 实测再改代码
+- 免费公开接口：东财/新浪/腾讯均无 SLA，需容灾与降级，接口结构变动需先 curl 实测再改代码
 - **上游限流教训**：2026-11-11 密集 curl 探测触发东财 IP 级限流（push2 全线 EOF 超 1 小时），因此新增 `cache` 包对上游请求做 TTL 节流（板块 60s / 个股 15s / 行情 10s / 成分 6h），前端轮询不直接放大到上游
 - 国内网络：Go 模块拉取走 goproxy.cn（已 `go env -w` 设置）；海外源仅 GitHub Pages（yfiua）经实测可达，nasdaq/wikipedia/yahoo 等均不可达
+- 静态资源必须带 `Cache-Control: no-store`：内嵌页面无 ETag/Last-Modified，浏览器曾缓存旧 JS 导致"改了没生效"的假 bug（2026-11-12 实例）
 
 ## 第三方集成
-- **东方财富 push2 / push2his**：主数据源（实时行情 ulist、列表 clist、日 K/分钟 K kline），2026-11-11 实测通过；限流期兜底
-- **新浪（兜底层 sina_ext.go）**：
+- **东方财富 push2 / push2his**：行情 ulist、列表 clist、日 K/分钟 K kline（2026-11-11 实测通过）；2026-11-12 实测 push2 系列连接失败（http=000/EOF），降为兜底，恢复后自动回到部分首选
+- **新浪（sina.go / sina_ext.go）**：
   - `hq.sinajs.cn` 批量行情 GBK（sh/sz 个股全字段 + gb_ 美股），A股/美股/ETF 混排实测通过
   - `Market_Center.getHQNodeData` A股列表（排序+分页，5341 只，注意数值字段 JSON 数字/字符串混排需 flexF 兼容）
   - `q/view/newSinaHy.php`（行业板块）与 `newFLJK.php?param=class`（概念板块），GBK JS 赋值，无板块内涨跌家数
   - `hq.sinajs.cn` 的 s_ 指数接口：大盘监控备用源
+  - `CN_MarketDataService.getKLineData` 日K（scale=240；2026-11-12 起 OHLCV 改为字符串返回，sinaKlineBar 用 flexF 兼容两种形态）
+- **腾讯财经（tencent.go，2026-11-12 新增）**：
+  - `qt.gtimg.cn/q=` 批量行情 GBK（~ 分隔 88 字段；A股 [35] 三段式成交额、美股 [37] 兜底；`usDJI/usNDX/usINX` 为 100.* 美股指数专用码）——已接入批量行情路由首选与探测看板
+  - `web.ifzq.gtimg.cn` 日K（fqkline，个股 qfqday/指数 day 双键）与当日分时（minute/query，date 为空或不足 2 条报错切源）——Source 接口三方法已实现+单测，待接线 server.go
+  - 响应必须 `io.ReadAll`：单次 `Body.Read` 在 101 只批量（约 50KB）下因 TCP 分段只读到部分（实测只回 84/101）
 - **yfiua/index-constituents（GitHub Pages）**：纳斯达克100 成分表（101 只，月度更新，Symbol 为 Yahoo 风格）
 - 注：均为免费公开接口，无鉴权、无配额保证，仅用于学习研究；东财限流期三个独占接口（美股指数行情/活跃榜/日K）优雅降级（占位提示/502/图表报错），恢复后自动可用

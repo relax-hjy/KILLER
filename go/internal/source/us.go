@@ -78,8 +78,8 @@ func USIndexSecids() []string {
 
 // 供 web 层做缓存 TTL 的默认值。
 const (
-	TTLBoards  = 60 * time.Second  // 板块：盘中 1 分钟
-	TTLStocks   = 15 * time.Second  // 个股列表：15 秒
-	TTLQuotes   = 10 * time.Second  // 批量行情：10 秒
-	TTLNDX      = 6 * time.Hour     // 成分表：6 小时
+	TTLBoards = 60 * time.Second // 板块：盘中 1 分钟
+	TTLStocks = 15 * time.Second // 个股列表：15 秒
+	TTLQuotes = 10 * time.Second // 批量行情：10 秒
+	TTLNDX    = 6 * time.Hour    // 成分表：6 小时
 )

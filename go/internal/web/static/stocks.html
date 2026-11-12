@@ -38,7 +38,7 @@
       <option value="f20">按总市值</option>
       <option value="f12">按代码</option>
     </select>
-    <span style="color:var(--muted);font-size:12px">点击行加入/移出自选 · 30 秒刷新</span>
+    <span style="color:var(--muted);font-size:12px">点击行查看日K/分时详情 · 点★加/移出自选 · 30 秒刷新</span>
   </div>
 
   <div class="panel">
@@ -58,12 +58,25 @@
   </div>
 </main>
 
-<footer>数据来源：东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+<!-- 个股详情抽屉 -->
+<div id="detail">
+  <span class="close" onclick="closeDetail()">✕</span>
+  <h2 id="dName">—</h2>
+  <div class="sub" id="dSub">—</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px" class="tabs">
+    <button id="dKline" class="on">日 K（120日）</button>
+    <button id="dIntraday">当日分时</button>
+  </div>
+  <canvas id="dChart"></canvas>
+  <div class="kpis" id="dKpis"></div>
+</div>
+
+<footer>数据来源：新浪财经 / 东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
 
 <script src="/common.js"></script>
 <script>
 "use strict";
-const STATE = { page: 1, sort: "f3", asc: false, total: 0, stocks: [], watch: [], q: "" };
+const STATE = { page: 1, sort: "f3", asc: false, total: 0, stocks: [], watch: [], q: "", detail: null, detailTab: "kline" };
 
 // ---- 自选 ----
 async function loadWatch() {
@@ -83,13 +96,13 @@ function renderWatch() {
   }
   $("watchBody").innerHTML = STATE.watch.map(w => {
     const q = w.quote;
-    return `<tr data-secid="${w.secid}" data-act="remove">
+    return `<tr data-secid="${w.secid}">
       <td>${w.code}</td>
       <td>${w.name || (q ? q.name : "—")}</td>
       <td>${q ? fmt(q.price) : "—"}</td>
       <td class="${q ? cls(q.pct) : "flat"}">${q ? pctStr(q.pct) : "—"}</td>
       <td>${w.threshold.toFixed(1)}%</td>
-      <td><span class="star on" title="移除">★</span></td>
+      <td><span class="star on" title="移出自选">★</span></td>
     </tr>`;
   }).join("");
 }
@@ -128,7 +141,7 @@ function renderStocks() {
   $("prev").disabled = STATE.page <= 1;
   $("body").innerHTML = rows.map(s => `
     <tr data-secid="${s.secid}">
-      <td>${isWatched(s.secid) ? '<span class="star on">★</span> ' : ""}${s.code}</td>
+      <td><span class="star${isWatched(s.secid) ? " on" : ""}" title="${isWatched(s.secid) ? "移出自选" : "加入自选"}">★</span> ${s.code}</td>
       <td>${s.name}</td>
       <td>${fmt(s.price)}</td>
       <td class="${cls(s.pct)}">${pctStr(s.pct)}</td>
@@ -143,16 +156,120 @@ $("body").addEventListener("click", async e => {
   const tr = e.target.closest("tr");
   if (!tr || !tr.dataset.secid) return;
   const s = STATE.stocks.find(x => x.secid === tr.dataset.secid);
-  if (s) { await toggleWatch(s); loadStocks(); }
+  if (!s) return;
+  if (e.target.closest(".star")) { await toggleWatch(s); loadStocks(); return; }
+  openDetail(s);
 });
 $("watchBody").addEventListener("click", async e => {
   const tr = e.target.closest("tr");
-  if (!tr || !tr.dataset.secid || tr.dataset.act !== "remove") return;
-  await fetch(`/api/watch?secid=${encodeURIComponent(tr.dataset.secid)}`, { method: "DELETE" });
-  toast("已移出自选");
-  await loadWatch();
-  loadStocks();
+  if (!tr || !tr.dataset.secid) return;
+  const w = STATE.watch.find(x => x.secid === tr.dataset.secid);
+  if (!w) return;
+  if (e.target.closest(".star")) {
+    await fetch(`/api/watch?secid=${encodeURIComponent(tr.dataset.secid)}`, { method: "DELETE" });
+    toast("已移出自选");
+    await loadWatch();
+    loadStocks();
+    return;
+  }
+  openDetail({ ...(w.quote || {}), secid: w.secid, code: w.code, name: w.name || (w.quote && w.quote.name) || "" });
 });
+
+// ---- 详情抽屉 ----
+const num = v => typeof v === "number" && !Number.isNaN(v) ? fmt(v) : "—";
+const kpiCap = v => typeof v === "number" && !Number.isNaN(v) ? fmtCap(v) : "—";
+const kpiAmt = v => typeof v === "number" && !Number.isNaN(v) ? fmtAmt(v) : "—";
+
+function openDetail(s) {
+  STATE.detail = s;
+  STATE.detailTab = "kline";
+  $("dKline").classList.add("on");
+  $("dIntraday").classList.remove("on");
+  $("dName").textContent = `${s.name || s.code} · ${s.code}`;
+  $("dSub").innerHTML = s.price
+    ? `现价 <span class="${cls(s.pct)}">${fmt(s.price)}（${pctStr(s.pct)}）</span>`
+    : "暂无行情（可能停牌）";
+  $("dKpis").innerHTML = [
+    ["今开", num(s.open)], ["最高", num(s.high)], ["最低", num(s.low)],
+    ["昨收", num(s.prev_close)], ["涨跌额", num(s.change)], ["总市值", kpiCap(s.market_cap)],
+    ["成交额", kpiAmt(s.amount)], ["换手率", s.turnover ? fmt(s.turnover) + "%" : "—"],
+    ["市盈率", s.pe > 0 ? fmt(s.pe, 1) : "—"],
+  ].map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  $("detail").classList.add("open");
+  loadDetailChart();
+}
+function closeDetail() { $("detail").classList.remove("open"); STATE.detail = null; }
+
+async function loadDetailChart() {
+  const s = STATE.detail;
+  if (!s) return;
+  const path = STATE.detailTab === "kline" ? "kline" : "intraday";
+  try {
+    const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=120" : ""}`);
+    drawDetail(data);
+  } catch (e) {
+    const c = $("dChart"), ctx = setup(c);
+    ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("图表加载失败（" + e.message + "）", ctx.canvas.clientWidth / 2, 130);
+  }
+}
+
+function setup(c) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 500, h = 260;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function drawDetail(data) {
+  const c = $("dChart");
+  const ctx = setup(c);
+  const w = c.clientWidth, h = 260;
+  ctx.clearRect(0, 0, w, h);
+  const pts = data.map(d => ({ x: d.date, y: d.close }));
+  if (pts.length < 2) {
+    ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("暂无数据", w / 2, h / 2);
+    return;
+  }
+  const pad = { l: 8, r: 58, t: 12, b: 22 };
+  const ys = pts.map(p => p.y);
+  let min = Math.min(...ys), max = Math.max(...ys);
+  const span = (max - min) || 1;
+  const X = i => pad.l + (w - pad.l - pad.r) * i / (pts.length - 1);
+  const Y = v => pad.t + (h - pad.t - pad.b) * (1 - (v - min) / span);
+
+  ctx.strokeStyle = "#2c3743"; ctx.fillStyle = "#8b98a5"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+  for (let g = 0; g <= 4; g++) {
+    const v = min + span * g / 4, y = Y(v);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+    ctx.fillText(v.toFixed(2), w - pad.r + 5, y + 4);
+  }
+  const last = pts[pts.length - 1].y, first = pts[0].y;
+  ctx.strokeStyle = last >= first ? "#f0453e" : "#22ab71";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.y)) : ctx.moveTo(X(i), Y(p.y)));
+  ctx.stroke();
+
+  ctx.fillStyle = "#8b98a5"; ctx.textAlign = "left";
+  ctx.fillText(String(pts[0].x).slice(0, 10), pad.l, h - 6);
+  ctx.textAlign = "right";
+  ctx.fillText(String(pts[pts.length - 1].x).slice(0, 16).replace("T", " "), w - pad.r, h - 6);
+}
+
+$("dKline").onclick = () => {
+  STATE.detailTab = "kline";
+  $("dKline").classList.add("on"); $("dIntraday").classList.remove("on");
+  loadDetailChart();
+};
+$("dIntraday").onclick = () => {
+  STATE.detailTab = "intraday";
+  $("dIntraday").classList.add("on"); $("dKline").classList.remove("on");
+  loadDetailChart();
+};
 
 $("q").addEventListener("input", e => { STATE.q = e.target.value; renderStocks(); });
 $("sort").addEventListener("change", e => {

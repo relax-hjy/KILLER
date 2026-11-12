@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"killer/internal/config"
@@ -22,25 +23,34 @@ var staticFS embed.FS
 
 // Server HTTP 服务。
 type Server struct {
-	cfg     *config.Config
-	wd      *monitor.Watchdog
-	st      *store.Store
-	kline   source.Source // K 线专用主数据源
-	mux     *http.ServeMux
+	cfg       *config.Config
+	wd        *monitor.Watchdog
+	st        *store.Store
+	klineEM   source.Source // 东财 K 线（也是分时唯一源）
+	klineSina source.Source // 新浪日 K（仅 A 股 sh/sz）
+	mux       *http.ServeMux
 }
 
 // New 构建路由。
 func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, error) {
-	kl, err := source.New(cfg.Datasource.Primary)
+	kl, err := source.New("eastmoney")
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, wd: wd, st: st, kline: kl, mux: http.NewServeMux()}
+	klSina, err := source.New("sina")
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{cfg: cfg, wd: wd, st: st, klineEM: kl, klineSina: klSina, mux: http.NewServeMux()}
 
 	sub, _ := fs.Sub(staticFS, "static")
-	s.mux.Handle("GET /", http.FileServerFS(sub))
+	// 禁缓存：静态页内嵌于二进制，改版后必须让浏览器拿到最新文件
+	// （此前无缓存控制，浏览器曾缓存旧 JS 导致按钮行为与代码不一致）
+	s.mux.Handle("GET /", noStore(http.FileServerFS(sub)))
 
 	s.mux.HandleFunc("GET /api/quotes", s.handleQuotes)
+	s.mux.HandleFunc("GET /api/board-quotes", s.handleBoardQuotes)
+	s.mux.HandleFunc("GET /api/board-members", s.handleBoardMembers)
 	s.mux.HandleFunc("GET /api/history", s.handleHistory)
 	s.mux.HandleFunc("GET /api/intraday", s.handleIntraday)
 	s.mux.HandleFunc("GET /api/kline", s.handleKline)
@@ -56,6 +66,12 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	s.mux.HandleFunc("GET /api/watch", s.handleWatch)
 	s.mux.HandleFunc("POST /api/watch", s.handleWatch)
 	s.mux.HandleFunc("DELETE /api/watch", s.handleWatch)
+
+	// 数据源治理
+	s.mux.HandleFunc("GET /api/datasources", s.handleDataSources)
+	s.mux.HandleFunc("POST /api/datasources/test", s.handleDataSourceTest)
+	s.mux.HandleFunc("GET /api/datasources/routing", s.handleRouting)
+	s.mux.HandleFunc("POST /api/datasources/routing", s.handleRouting)
 	return s, nil
 }
 
@@ -72,9 +88,26 @@ func writeJSON(w http.ResponseWriter, v any) {
 	}
 }
 
+// noStore 给响应加 Cache-Control: no-store（内嵌静态资源改版即生效）。
+func noStore(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		h.ServeHTTP(w, r)
+	})
+}
+
 // handleQuotes GET /api/quotes — 全部指数最新行情。
 func (s *Server) handleQuotes(w http.ResponseWriter, r *http.Request) {
 	quotes := s.wd.Latest()
+	if quotes == nil {
+		quotes = []model.Quote{}
+	}
+	writeJSON(w, quotes)
+}
+
+// handleBoardQuotes GET /api/board-quotes — 全部监控板块最新行情。
+func (s *Server) handleBoardQuotes(w http.ResponseWriter, r *http.Request) {
+	quotes := s.wd.LatestBoards()
 	if quotes == nil {
 		quotes = []model.Quote{}
 	}
@@ -111,7 +144,7 @@ func (s *Server) handleIntraday(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing secid", http.StatusBadRequest)
 		return
 	}
-	klines, err := s.kline.FetchMinuteKline(r.Context(), secid)
+	klines, err := s.klineEM.FetchMinuteKline(r.Context(), secid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -122,7 +155,13 @@ func (s *Server) handleIntraday(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, klines)
 }
 
+// isUSSecid 判断是否美股 secid（新浪 K 线仅支持 sh/sz）。
+func isUSSecid(secid string) bool {
+	return strings.HasPrefix(secid, "105.") || strings.HasPrefix(secid, "106.") || strings.HasPrefix(secid, "107.")
+}
+
 // handleKline GET /api/kline?secid=1.000001&limit=120 — 日 K 走势。
+// 按路由顺序尝试数据源；美股 secid 固定东财（新浪 getKLineData 仅支持 sh/sz）。
 func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 	secid := r.URL.Query().Get("secid")
 	if secid == "" {
@@ -133,16 +172,27 @@ func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 500 {
 		limit = 120
 	}
-	// K 线走主数据源
-	klines, err := s.kline.FetchKline(r.Context(), secid, limit)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
+	order := []source.Source{s.klineEM, s.klineSina}
+	if source.GetRouting(source.FeatKline) == source.SrcSina && !isUSSecid(secid) {
+		order = []source.Source{s.klineSina, s.klineEM}
 	}
-	if klines == nil {
-		klines = []model.Kline{}
+	var lastErr error
+	for _, src := range order {
+		if src == s.klineSina && isUSSecid(secid) {
+			continue // 新浪不支持美股 K 线
+		}
+		klines, err := src.FetchKline(r.Context(), secid, limit)
+		if err == nil {
+			if klines == nil {
+				klines = []model.Kline{}
+			}
+			writeJSON(w, klines)
+			return
+		}
+		lastErr = err
+		log.Printf("[Web] K线源 %s 失败(%s): %v", src.Name(), secid, err)
 	}
-	writeJSON(w, klines)
+	http.Error(w, lastErr.Error(), http.StatusBadGateway)
 }
 
 // handleAlerts GET /api/alerts?n=50 — 最近告警。

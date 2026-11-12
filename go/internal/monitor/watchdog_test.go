@@ -1,9 +1,60 @@
 package monitor
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
+
+	"killer/internal/config"
+	"killer/internal/model"
+	"killer/internal/store"
 )
+
+// TestEvaluateBoardChangeThreshold 验证板块用独立涨跌幅阈值：
+// 指数 1.5% 超全局 1% 触发；板块 1.5% 低于板块阈值 2% 不触发；板块 2.5% 触发且阈值为 2%。
+func TestEvaluateBoardChangeThreshold(t *testing.T) {
+	cfg := config.Default()
+	cfg.Indices = []config.Index{{SecID: "1.000001", Name: "上证指数"}}
+	cfg.Boards = []config.Index{
+		{SecID: "90.BK1128", Name: "CPO概念"},
+		{SecID: "90.BK0877", Name: "PCB"},
+	}
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("打开测试库失败: %v", err)
+	}
+	defer st.Close()
+
+	w := &Watchdog{cfg: cfg, store: st, latest: map[string]model.Quote{}}
+	quotes := []model.Quote{
+		{SecID: "1.000001", Name: "上证指数", Pct: 1.5, Price: 3300},
+		{SecID: "90.BK1128", Name: "CPO概念", Pct: 1.5, Price: 1000},
+		{SecID: "90.BK0877", Name: "PCB", Pct: 2.5, Price: 1000},
+	}
+
+	fired := w.evaluate(quotes)
+
+	got := map[string]model.Alert{}
+	for _, a := range fired {
+		got[a.SecID] = a
+	}
+	if a, ok := got["1.000001"]; !ok {
+		t.Error("指数 1.5% 应超过全局阈值 1% 触发告警")
+	} else if a.Threshold != cfg.Monitoring.Alert.ChangePct {
+		t.Errorf("指数告警阈值=%v want %v", a.Threshold, cfg.Monitoring.Alert.ChangePct)
+	}
+	if _, ok := got["90.BK1128"]; ok {
+		t.Error("板块 1.5% 未达板块阈值 2%，不应触发告警")
+	}
+	if a, ok := got["90.BK0877"]; !ok {
+		t.Error("板块 2.5% 应超过板块阈值 2% 触发告警")
+	} else if a.Threshold != cfg.Monitoring.Alert.BoardChangePct {
+		t.Errorf("板块告警阈值=%v want %v", a.Threshold, cfg.Monitoring.Alert.BoardChangePct)
+	} else if a.Name != "PCB" {
+		t.Errorf("板块告警名称=%q want %q", a.Name, "PCB")
+	}
+}
 
 // TestTradingHours 验证交易时段判断（北京时间口径）。
 func TestTradingHours(t *testing.T) {

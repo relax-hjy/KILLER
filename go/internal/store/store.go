@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS watch_stock (
 	added_at  INTEGER NOT NULL,
 	notes     TEXT    NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS setting (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 `
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -205,4 +210,28 @@ func (s *Store) ListWatchStocks() ([]model.WatchStock, error) {
 		out = append(out, w)
 	}
 	return out, rows.Err()
+}
+
+// ==========================================
+// Setting 键值设置（数据源路由等持久化）
+// ==========================================
+
+// GetSetting 读取设置值（不存在返回空串）。
+func (s *Store) GetSetting(key string) (string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM setting WHERE key=?`, key).Scan(&v)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return v, err
+}
+
+// SetSetting 写入设置值（upsert）。
+func (s *Store) SetSetting(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO setting(key,value) VALUES(?,?)
+		 ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+		key, value,
+	)
+	return err
 }

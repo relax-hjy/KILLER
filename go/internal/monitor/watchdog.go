@@ -9,6 +9,7 @@ package monitor
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,10 +36,10 @@ func tradingHours(t time.Time) bool {
 
 // Watchdog 大盘监控看门狗。
 type Watchdog struct {
-	cfg     *config.Config
-	primary source.Source
+	cfg      *config.Config
+	primary  source.Source
 	fallback source.Source
-	store   *store.Store
+	store    *store.Store
 
 	mu      sync.Mutex
 	latest  map[string]model.Quote // secid → 最新行情
@@ -71,36 +72,58 @@ func New(cfg *config.Config, st *store.Store) (*Watchdog, error) {
 	}, nil
 }
 
-// secids 返回监控指数列表。
+// secids 返回监控标的列表（指数 + 板块，一次批量拉取）。
 func (w *Watchdog) secids() []string {
-	out := make([]string, 0, len(w.cfg.Indices))
+	out := make([]string, 0, len(w.cfg.Indices)+len(w.cfg.Boards))
 	for _, ix := range w.cfg.Indices {
 		out = append(out, ix.SecID)
+	}
+	for _, b := range w.cfg.Boards {
+		out = append(out, b.SecID)
 	}
 	return out
 }
 
-// nameOf secid → 配置中的显示名。
+// nameOf secid → 配置中的显示名（先查指数再查板块）。
 func (w *Watchdog) nameOf(secid string) string {
 	for _, ix := range w.cfg.Indices {
 		if ix.SecID == secid {
 			return ix.Name
 		}
 	}
+	for _, b := range w.cfg.Boards {
+		if b.SecID == secid {
+			return b.Name
+		}
+	}
 	return secid
 }
 
-// fetchQuotes 主源失败切备用源。
+// isBoard 判断是否板块标的（东财板块市场号 90）。
+func isBoard(secid string) bool {
+	return strings.HasPrefix(secid, "90.")
+}
+
+// fetchQuotes 按数据源路由拉取指数行情（首选失败切另一源）。
 func (w *Watchdog) fetchQuotes(ctx context.Context) ([]model.Quote, error) {
-	quotes, err := w.primary.FetchQuotes(ctx, w.secids())
-	if err == nil {
-		return quotes, nil
+	// 路由顺序：eastmoney → primary/fallback 对调
+	order := []source.Source{w.primary, w.fallback}
+	if source.GetRouting(source.FeatQuotes) == source.SrcSina && w.fallback != nil {
+		order = []source.Source{w.fallback, w.primary}
 	}
-	log.Printf("[Watchdog] 主源 %s 失败: %v，切换备用源", w.primary.Name(), err)
-	if w.fallback == nil {
-		return nil, err
+	var lastErr error
+	for _, src := range order {
+		if src == nil {
+			continue
+		}
+		quotes, err := src.FetchQuotes(ctx, w.secids())
+		if err == nil {
+			return quotes, nil
+		}
+		lastErr = err
+		log.Printf("[Watchdog] 数据源 %s 失败: %v", src.Name(), err)
 	}
-	return w.fallback.FetchQuotes(ctx, w.secids())
+	return nil, lastErr
 }
 
 // CheckOnce 执行一轮巡检：拉行情 → 落库 → 阈值比对 → 触发告警。
@@ -217,14 +240,19 @@ func (w *Watchdog) evaluate(quotes []model.Quote) []model.Alert {
 
 	var fired []model.Alert
 	for _, q := range quotes {
+		// 板块波动大于指数，涨跌幅用独立阈值（未配置时沿用全局）
+		changeTh := ac.ChangePct
+		if isBoard(q.SecID) && ac.BoardChangePct > 0 {
+			changeTh = ac.BoardChangePct
+		}
 		type check struct {
 			alertType string
 			value     float64
 			threshold float64
 		}
 		checks := []check{
-			{"change_up", q.Pct, ac.ChangePct},
-			{"change_down", -q.Pct, ac.ChangePct},
+			{"change_up", q.Pct, changeTh},
+			{"change_down", -q.Pct, changeTh},
 			{"amplitude", q.Amplitude, ac.AmplitudePct},
 		}
 		for _, c := range checks {
@@ -287,7 +315,7 @@ func (w *Watchdog) Start() {
 			}
 		}
 	}()
-	log.Printf("[Watchdog] 定时巡检已启动 (间隔=%s, 指数=%d 个)", w.cfg.CheckInterval(), len(w.cfg.Indices))
+	log.Printf("[Watchdog] 定时巡检已启动 (间隔=%s, 指数=%d 个, 板块=%d 个)", w.cfg.CheckInterval(), len(w.cfg.Indices), len(w.cfg.Boards))
 }
 
 // Stop 停止巡检。
@@ -301,9 +329,22 @@ func (w *Watchdog) Stop() {
 func (w *Watchdog) Latest() []model.Quote {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	out := make([]model.Quote, 0, len(w.latest))
+	out := make([]model.Quote, 0, len(w.cfg.Indices))
 	for _, ix := range w.cfg.Indices {
 		if q, ok := w.latest[ix.SecID]; ok {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// LatestBoards 返回所有监控板块的最新行情快照。
+func (w *Watchdog) LatestBoards() []model.Quote {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]model.Quote, 0, len(w.cfg.Boards))
+	for _, b := range w.cfg.Boards {
+		if q, ok := w.latest[b.SecID]; ok {
 			out = append(out, q)
 		}
 	}
@@ -321,6 +362,7 @@ func (w *Watchdog) Status() map[string]any {
 		"interval_sec":  w.cfg.Monitoring.CheckIntervalSec,
 		"trading_hours": tradingHours(time.Now()),
 		"monitored":     len(w.cfg.Indices),
+		"boards":        len(w.cfg.Boards),
 	}
 }
 

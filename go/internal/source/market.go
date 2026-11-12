@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"killer/internal/model"
@@ -83,16 +84,27 @@ func fetchList(ctx context.Context, fs, fid string, po, page, pz int, fields str
 
 const boardFields = "f2,f3,f4,f12,f14,f104,f105"
 
-// FetchBoards 拉取全部板块列表。kind: "industry"(行业 t:2) | "concept"(概念 t:3)。
+// FetchBoards 拉取板块列表。kind: "industry"(行业 t:2) | "concept"(概念 t:3)。
 // sort: "pct_desc" | "pct_asc"（按涨跌幅）。
-// 东财主源，失败自动切新浪兜底。
+// 按路由顺序尝试（东财/新浪），首个成功即返回。
 func FetchBoards(ctx context.Context, kind, sort string) ([]model.Board, error) {
-	boards, err := fetchBoardsEM(ctx, kind, sort)
-	if err == nil {
-		return boards, nil
+	var lastErr error
+	for _, src := range pairFor(FeatBoards) {
+		var boards []model.Board
+		var err error
+		switch src {
+		case SrcSina:
+			boards, err = sinaBoards(ctx, kind, sort)
+		default:
+			boards, err = fetchBoardsEM(ctx, kind, sort)
+		}
+		if err == nil {
+			return boards, nil
+		}
+		lastErr = err
+		log.Printf("[Source] 板块源 %s 失败: %v", src, err)
 	}
-	log.Printf("[Source] 东财板块失败(%v)，切新浪兜底", err)
-	return sinaBoards(ctx, kind, sort)
+	return nil, lastErr
 }
 
 func fetchBoardsEM(ctx context.Context, kind, sort string) ([]model.Board, error) {
@@ -131,20 +143,61 @@ func fetchBoardsEM(ctx context.Context, kind, sort string) ([]model.Board, error
 	return out, nil
 }
 
+// ---- 板块成分股 ----
+
+// FetchBoardMembers 拉取板块成分股（东财专属，新浪无对应接口），按涨幅降序分页取全。
+// secid 形如 90.BK1128；成分股的流通市值(f21)用于前端计算权重占比。
+func FetchBoardMembers(ctx context.Context, secid string) ([]model.Stock, error) {
+	if !strings.HasPrefix(secid, "90.BK") {
+		return nil, fmt.Errorf("非法板块 secid: %s（应为 90.BKxxxx）", secid)
+	}
+	fs := "b:" + strings.TrimPrefix(secid, "90.") + "+f:!50"
+	var out []model.Stock
+	now := time.Now()
+	for page := 1; page <= 5; page++ { // 单板块成分 ≤500，pz=100 最多 5 页
+		total, err := fetchList(ctx, fs, "f3", 1, page, 100, stockFields, func(raw json.RawMessage) error {
+			s, err := parseStock(raw, now)
+			if err != nil {
+				return err
+			}
+			out = append(out, s)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(out) >= total {
+			break
+		}
+	}
+	return out, nil
+}
+
 // ---- A股个股 ----
 
 const stockFields = "f2,f3,f4,f5,f6,f7,f8,f9,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23"
 
 // FetchStocks 拉取沪深 A 股分页列表。
 // sortFid: f3涨幅 f6成交额 f8换手 f9市盈率 f20总市值 f21流通市值 f12代码。
-// 返回 (stocks, total, err)。东财主源，失败自动切新浪兜底。
+// 返回 (stocks, total, err)。按路由顺序尝试（东财/新浪）。
 func FetchStocks(ctx context.Context, page, pz int, sortFid string, asc bool) ([]model.Stock, int, error) {
-	stocks, total, err := fetchStocksEM(ctx, page, pz, sortFid, asc)
-	if err == nil {
-		return stocks, total, nil
+	var lastErr error
+	for _, src := range pairFor(FeatStocks) {
+		var stocks []model.Stock
+		var total int
+		var err error
+		if src == SrcSina {
+			stocks, total, err = sinaStocks(ctx, page, pz, sortFid, asc)
+		} else {
+			stocks, total, err = fetchStocksEM(ctx, page, pz, sortFid, asc)
+		}
+		if err == nil {
+			return stocks, total, nil
+		}
+		lastErr = err
+		log.Printf("[Source] A股列表源 %s 失败: %v", src, err)
 	}
-	log.Printf("[Source] 东财A股列表失败(%v)，切新浪兜底", err)
-	return sinaStocks(ctx, page, pz, sortFid, asc)
+	return nil, 0, lastErr
 }
 
 func fetchStocksEM(ctx context.Context, page, pz int, sortFid string, asc bool) ([]model.Stock, int, error) {
@@ -205,7 +258,7 @@ func parseStock(raw json.RawMessage, now time.Time) (model.Stock, error) {
 		Price: flt(d.F2), Pct: flt(d.F3), Change: flt(d.F4),
 		Open: flt(d.F17), High: flt(d.F15), Low: flt(d.F16), PrevClose: flt(d.F18),
 		Amount: flt(d.F6), Turnover: flt(d.F8),
-		PE: flt(d.F9), PB: flt(d.F23), MarketCap: flt(d.F20),
+		PE: flt(d.F9), PB: flt(d.F23), MarketCap: flt(d.F20), FloatCap: flt(d.F21),
 		UpdateTime: now,
 	}, nil
 }
@@ -242,15 +295,29 @@ func FetchUSStocks(ctx context.Context, page, pz int, sortFid, market string, as
 	return out, total, nil
 }
 
-// FetchUSQuotes 批量获取指定证券行情（A股/美股/板块 ETF 通吃，复用 ulist）。
-// 东财主源，失败自动切新浪兜底（sh/sz/gb_ 通排；100.* 指数新浪不支持，兜底时缺该条）。
+// FetchUSQuotes 批量获取指定证券行情（A股/美股/板块 ETF 通吃）。
+// 按路由顺序尝试（腾讯 qt.gtimg / 东财 ulist / 新浪 hq 批量）；
+// 腾讯对 100.* 美股指数有专用码（usDJI/usNDX/usINX），新浪不支持该三只。
 func FetchUSQuotes(ctx context.Context, secids []string) ([]model.Stock, error) {
-	quotes, err := fetchQuotesEM(ctx, secids)
-	if err == nil {
-		return quotes, nil
+	var lastErr error
+	for _, src := range pairFor(FeatBatch) {
+		var quotes []model.Stock
+		var err error
+		switch src {
+		case SrcTencent:
+			quotes, err = tencentBatchQuotes(ctx, secids)
+		case SrcSina:
+			quotes, err = sinaBatchQuotes(ctx, secids)
+		default:
+			quotes, err = fetchQuotesEM(ctx, secids)
+		}
+		if err == nil {
+			return quotes, nil
+		}
+		lastErr = err
+		log.Printf("[Source] 批量行情源 %s 失败: %v", src, err)
 	}
-	log.Printf("[Source] 东财批行情失败(%v)，切新浪兜底", err)
-	return sinaBatchQuotes(ctx, secids)
+	return nil, lastErr
 }
 
 func fetchQuotesEM(ctx context.Context, secids []string) ([]model.Stock, error) {

@@ -2,6 +2,7 @@ package web
 
 // 市场扩展 API：
 //   GET    /api/boards?kind=&sort=        A股板块（行业/概念）
+//   GET    /api/board-members?secid=      板块成分股（东财专属）
 //   GET    /api/stocks?page=&sort=&asc=   A股个股分页
 //   GET    /api/us/overview               美股三大指数 + SPDR 板块
 //   GET    /api/us/stocks?page=&market=   美股个股分页
@@ -13,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"killer/internal/cache"
 	"killer/internal/model"
@@ -42,6 +44,28 @@ func (s *Server) handleBoards(w http.ResponseWriter, r *http.Request) {
 		boards = []model.Board{}
 	}
 	writeJSON(w, boards)
+}
+
+// handleBoardMembers GET /api/board-members?secid=90.BK1128 — 板块成分股（东财专属）。
+// 返回按涨幅降序的成分股（含流通市值，供前端计算权重占比）。
+func (s *Server) handleBoardMembers(w http.ResponseWriter, r *http.Request) {
+	secid := r.URL.Query().Get("secid")
+	if !strings.HasPrefix(secid, "90.BK") {
+		http.Error(w, "invalid secid, expect 90.BKxxxx", http.StatusBadRequest)
+		return
+	}
+	v, err := marketCache.GetOrSet("bmembers:"+secid, source.TTLBoards, func() (any, error) {
+		return source.FetchBoardMembers(r.Context(), secid)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	members, _ := v.([]model.Stock)
+	if members == nil {
+		members = []model.Stock{}
+	}
+	writeJSON(w, members)
 }
 
 // handleStocks GET /api/stocks?page=1&sort=f3&asc=0
