@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KILLER · A股 ETF</title>
+<link rel="stylesheet" href="/market.css">
+<style>
+/* 市场 ETF 组合分组区块（仅本页使用，不污染全局 market.css） */
+.group-block { margin-bottom: 8px; }
+.group-head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 14px 0 8px;
+}
+.group-name {
+  font-size: var(--font-body); font-weight: 620; color: var(--text-secondary);
+  letter-spacing: -0.01em;
+}
+.group-desc { font-size: var(--font-meta); color: var(--text-tertiary); }
+.group-block .cards { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KILLER<span class="en">A股 ETF 监控</span></h1>
+  <nav></nav>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <!-- 监控卡片（config.yaml etfs 段固定列表，看门狗每轮巡检带告警） -->
+  <div class="sec-title">自监控 ETF <span class="hint">（config.yaml 固定列表，涨跌幅超 etf_change_pct 自动告警，随大盘巡检 60s 一轮）</span></div>
+  <div class="cards" id="watchCards">
+    <div class="card"><div class="name"><span>加载中 …</span></div></div>
+  </div>
+
+  <!-- 市场 ETF 组合（config.yaml etf_groups 段，按类别分组，纯看盘不告警） -->
+  <div class="sec-title">市场 ETF 组合 <span class="hint">（按类别分组的市场热门 ETF，点击卡片看详情，10 秒刷新）</span></div>
+  <div id="groupArea">
+    <div class="card"><div class="name"><span>加载中 …</span></div></div>
+  </div>
+
+  <!-- 全市场 -->
+  <div class="toolbar">
+    <input id="q" placeholder="输入代码或名称筛选当前页（如 510300 / 创业板）" style="width:280px">
+    <select id="sort">
+      <option value="f6">按成交额</option>
+      <option value="f3">按涨幅</option>
+      <option value="f3asc">按跌幅</option>
+      <option value="f8">按换手率</option>
+      <option value="f20">按总市值</option>
+      <option value="f12">按代码</option>
+    </select>
+    <span class="hint">点击行查看日K/分时详情 · 30 秒刷新 · 东财限流期列表会加载失败</span>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th>代码</th><th>名称</th><th>现价</th><th>涨跌幅</th><th>成交额</th><th>换手</th><th>总市值</th>
+        </tr>
+      </thead>
+      <tbody id="body"><tr><td colspan="7" class="loading">加载中 …</td></tr></tbody>
+    </table>
+    <div class="pager">
+      <button id="prev">上一页</button>
+      <span id="pageInfo">—</span>
+      <button id="next">下一页</button>
+    </div>
+  </div>
+</main>
+
+<!-- ETF 详情抽屉 -->
+<div id="detail">
+  <span class="close" onclick="closeDetail()">✕</span>
+  <h2 id="dName">—</h2>
+  <div class="sub" id="dSub">—</div>
+  <div style="display:flex;gap:8px;margin-bottom:12px" class="tabs">
+    <button id="dKline" class="on">日 K（120日）</button>
+    <button id="dIntraday">当日分时</button>
+  </div>
+  <canvas id="dChart"></canvas>
+  <div class="kpis" id="dKpis"></div>
+</div>
+
+<footer>数据来源：腾讯财经 / 新浪财经 / 东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+
+<script src="/common.js"></script>
+<script>
+"use strict";
+const STATE = { page: 1, sort: "f6", asc: false, total: 0, etfs: [], watch: [], groups: [], q: "", detail: null, detailTab: "kline" };
+
+// ---- 卡片渲染公共函数（自监控 / 组合 复用）----
+function renderQuoteCard(q) {
+  const amp = q.amplitude > 0 ? `振幅 ${fmt(q.amplitude)}%` : "";
+  const vol = q.volume > 0 ? `额 ${fmtAmt(q.volume)}` : "";
+  return `<div class="card" data-secid="${q.secid}">
+    <div class="name"><span>${q.name || q.code}</span><span class="code">${q.code}</span></div>
+    <div class="price ${cls(q.pct)}">${fmt(q.price)}</div>
+    <div class="delta ${cls(q.pct)}">${pctStr(q.pct)}（${fmt(q.change)}）</div>
+    <div class="sub"><span>${amp}</span><span>${vol}</span></div>
+  </div>`;
+}
+// Quote → openDetail 所需的 Stock 形态（补齐 KPI 占位字段）
+function quoteToDetail(q) {
+  return { ...q, market_cap: 0, turnover: 0, amount: q.volume, pe: 0 };
+}
+
+// ---- 自监控 ETF 卡片（来自 /api/etf-quotes）----
+async function loadWatch() {
+  try {
+    STATE.watch = await getJSON("/api/etf-quotes");
+    renderWatch();
+  } catch (e) {
+    $("watchCards").innerHTML = `<div class="card"><div class="name"><span class="err">加载失败：${e.message}</span></div></div>`;
+  }
+}
+function renderWatch() {
+  if (!STATE.watch.length) {
+    $("watchCards").innerHTML = `<div class="card"><div class="name"><span>暂无监控 ETF（config.yaml etfs 段为空）</span></div></div>`;
+    return;
+  }
+  $("watchCards").innerHTML = STATE.watch.map(renderQuoteCard).join("");
+}
+$("watchCards").addEventListener("click", e => {
+  const card = e.target.closest(".card");
+  if (!card || !card.dataset.secid) return;
+  const q = STATE.watch.find(x => x.secid === card.dataset.secid);
+  if (q) openDetail(quoteToDetail(q));
+});
+
+// ---- 市场 ETF 组合（按类别分组，/api/etf-groups）----
+async function loadGroups() {
+  try {
+    STATE.groups = await getJSON("/api/etf-groups");
+    renderGroups();
+  } catch (e) {
+    $("groupArea").innerHTML = `<div class="card"><div class="name"><span class="err">加载失败：${e.message}</span></div></div>`;
+  }
+}
+function renderGroups() {
+  if (!STATE.groups.length) {
+    $("groupArea").innerHTML = `<div class="card"><div class="name"><span>暂无 ETF 组合（config.yaml etf_groups 段为空）</span></div></div>`;
+    return;
+  }
+  $("groupArea").innerHTML = STATE.groups.map(g => `
+    <div class="group-block">
+      <div class="group-head"><span class="group-name">${g.name}</span><span class="group-desc">${g.desc || ""}</span></div>
+      <div class="cards">
+        ${(g.quotes || []).map(renderQuoteCard).join("") || '<div class="card"><div class="name"><span>本组暂无行情</span></div></div>'}
+      </div>
+    </div>`).join("");
+}
+$("groupArea").addEventListener("click", e => {
+  const card = e.target.closest(".card");
+  if (!card || !card.dataset.secid) return;
+  let q;
+  for (const g of STATE.groups) {
+    q = (g.quotes || []).find(x => x.secid === card.dataset.secid);
+    if (q) break;
+  }
+  if (q) openDetail(quoteToDetail(q));
+});
+
+// ---- 全市场 ETF 列表 ----
+async function loadETFs() {
+  $("body").innerHTML = `<tr><td colspan="7" class="loading">加载中 …</td></tr>`;
+  try {
+    const r = await getJSON(`/api/etfs?page=${STATE.page}&sort=${STATE.sort}&asc=${STATE.asc ? 1 : 0}`);
+    STATE.etfs = r.items;
+    STATE.total = r.total;
+    renderETFs();
+  } catch (e) {
+    $("body").innerHTML = `<tr><td colspan="7" class="empty">加载失败：${e.message}（东财限流期暂不可用，监控卡片正常显示）</td></tr>`;
+  }
+}
+function renderETFs() {
+  const q = STATE.q.trim();
+  const rows = STATE.etfs.filter(s => !q || s.code.includes(q) || (s.name || "").includes(q));
+  $("pageInfo").textContent = `第 ${STATE.page} 页 / 共 ${Math.max(1, Math.ceil(STATE.total / 50))} 页 · ${STATE.total} 只`;
+  $("prev").disabled = STATE.page <= 1;
+  $("body").innerHTML = rows.map(s => `
+    <tr data-secid="${s.secid}">
+      <td>${s.code}</td>
+      <td>${s.name}</td>
+      <td>${fmt(s.price)}</td>
+      <td class="${cls(s.pct)}">${pctStr(s.pct)}</td>
+      <td>${fmtAmt(s.amount)}</td>
+      <td>${s.turnover ? fmt(s.turnover) + "%" : "—"}</td>
+      <td>${fmtCap(s.market_cap)}</td>
+    </tr>`).join("") || `<tr><td colspan="7" class="empty">本页无匹配</td></tr>`;
+}
+
+$("body").addEventListener("click", e => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.dataset.secid) return;
+  const s = STATE.etfs.find(x => x.secid === tr.dataset.secid);
+  if (s) openDetail(s);
+});
+
+// ---- 详情抽屉 ----
+const num = v => typeof v === "number" && !Number.isNaN(v) ? fmt(v) : "—";
+const kpiCap = v => typeof v === "number" && !Number.isNaN(v) ? fmtCap(v) : "—";
+const kpiAmt = v => typeof v === "number" && !Number.isNaN(v) ? fmtAmt(v) : "—";
+
+function openDetail(s) {
+  STATE.detail = s;
+  STATE.detailTab = "kline";
+  $("dKline").classList.add("on");
+  $("dIntraday").classList.remove("on");
+  $("dName").textContent = `${s.name || s.code} · ${s.code}`;
+  $("dSub").innerHTML = s.price
+    ? `现价 <span class="${cls(s.pct)}">${fmt(s.price)}（${pctStr(s.pct)}）</span>`
+    : "暂无行情（可能停牌）";
+  $("dKpis").innerHTML = [
+    ["今开", num(s.open)], ["最高", num(s.high)], ["最低", num(s.low)],
+    ["昨收", num(s.prev_close)], ["涨跌额", num(s.change)], ["总市值", kpiCap(s.market_cap)],
+    ["成交额", kpiAmt(s.amount)], ["换手率", s.turnover ? fmt(s.turnover) + "%" : "—"],
+  ].map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  $("detail").classList.add("open");
+  loadDetailChart();
+}
+function closeDetail() { $("detail").classList.remove("open"); STATE.detail = null; }
+
+async function loadDetailChart() {
+  const s = STATE.detail;
+  if (!s) return;
+  const path = STATE.detailTab === "kline" ? "kline" : "intraday";
+  try {
+    const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=120" : ""}`);
+    drawDetail(data);
+  } catch (e) {
+    const { ctx, w, h } = setupCanvas($("dChart"), 260);
+    drawHint(ctx, w, h, "图表加载失败（" + e.message + "）");
+  }
+}
+
+function drawDetail(data) {
+  drawTimeSeries($("dChart"), data, {
+    height: 260,
+    emptyText: "暂无数据",
+    labelDigits: 3, // ETF 价格通常较小（如 4.114），3 位小数更精确
+  });
+}
+
+$("dKline").onclick = () => {
+  STATE.detailTab = "kline";
+  $("dKline").classList.add("on"); $("dIntraday").classList.remove("on");
+  loadDetailChart();
+};
+$("dIntraday").onclick = () => {
+  STATE.detailTab = "intraday";
+  $("dIntraday").classList.add("on"); $("dKline").classList.remove("on");
+  loadDetailChart();
+};
+
+$("q").addEventListener("input", e => { STATE.q = e.target.value; renderETFs(); });
+$("sort").addEventListener("change", e => {
+  const v = e.target.value;
+  if (v === "f3asc") { STATE.sort = "f3"; STATE.asc = true; }
+  else { STATE.sort = v; STATE.asc = false; }
+  STATE.page = 1;
+  loadETFs();
+});
+$("prev").onclick = () => { if (STATE.page > 1) { STATE.page--; loadETFs(); } };
+$("next").onclick = () => {
+  if (STATE.page * 50 < STATE.total) { STATE.page++; loadETFs(); }
+};
+
+renderNav(NAV, "/etfs.html");
+startClock();
+loadWatch();
+loadGroups();
+loadETFs();
+setInterval(loadWatch, 10000);  // 监控卡片 10s 刷新（与大盘巡检节奏对齐）
+setInterval(loadGroups, 10000); // 市场组合卡片 10s 刷新
+setInterval(loadETFs, 30000);   // 全市场列表 30s 刷新
+</script>
+</body>
+</html>

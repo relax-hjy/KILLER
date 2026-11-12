@@ -46,12 +46,12 @@ func (s *Server) handleBoards(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, boards)
 }
 
-// handleBoardMembers GET /api/board-members?secid=90.BK1128 — 板块成分股（东财专属）。
-// 返回按涨幅降序的成分股（含流通市值，供前端计算权重占比）。
+// handleBoardMembers GET /api/board-members?secid=pt02003891 — 板块成分股（腾讯首选，东财兜底）。
+// 返回成分股（含流通市值，供前端计算权重占比）。
 func (s *Server) handleBoardMembers(w http.ResponseWriter, r *http.Request) {
 	secid := r.URL.Query().Get("secid")
-	if !strings.HasPrefix(secid, "90.BK") {
-		http.Error(w, "invalid secid, expect 90.BKxxxx", http.StatusBadRequest)
+	if !source.IsBoardSecid(secid) && !strings.HasPrefix(secid, "90.BK") {
+		http.Error(w, "invalid secid, expect pt-prefixed or 90.BKxxxx", http.StatusBadRequest)
 		return
 	}
 	v, err := marketCache.GetOrSet("bmembers:"+secid, source.TTLBoards, func() (any, error) {
@@ -104,6 +104,125 @@ func (s *Server) handleStocks(w http.ResponseWriter, r *http.Request) {
 		stocks = []model.Stock{}
 	}
 	writeJSON(w, resp{Items: stocks, Total: total, Page: page})
+}
+
+// handleETFs GET /api/etfs?page=1&sort=f3&asc=0 — 全市场 ETF 分页（东财 clist）。
+// sort 同 stocks：f3涨幅 f6成交额 f8换手 f9市盈率 f20总市值 f21流通市值 f12代码。
+// 东财限流期返回 502，前端展示提示（与 stocks 页同命运）。
+func (s *Server) handleETFs(w http.ResponseWriter, r *http.Request) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page <= 0 {
+		page = 1
+	}
+	sort := r.URL.Query().Get("sort")
+	valid := map[string]bool{"f3": true, "f6": true, "f8": true, "f9": true, "f20": true, "f21": true, "f12": true}
+	if !valid[sort] {
+		sort = "f6" // ETF 默认按成交额（活跃度），与 stocks 默认涨幅不同
+	}
+	asc := r.URL.Query().Get("asc") == "1"
+	key := "etfs:" + strconv.Itoa(page) + ":" + sort + ":" + strconv.FormatBool(asc)
+	v, err := marketCache.GetOrSet(key, source.TTLStocks, func() (any, error) {
+		etfs, total, err := source.FetchETFs(r.Context(), page, 50, sort, asc)
+		if err != nil {
+			return nil, err
+		}
+		return []any{etfs, total}, nil
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	type resp struct {
+		Items []model.Stock `json:"items"`
+		Total int           `json:"total"`
+		Page  int           `json:"page"`
+	}
+	r2 := v.([]any)
+	etfs, _ := r2[0].([]model.Stock)
+	total, _ := r2[1].(int)
+	if etfs == nil {
+		etfs = []model.Stock{}
+	}
+	writeJSON(w, resp{Items: etfs, Total: total, Page: page})
+}
+
+// handleETFQuotes GET /api/etf-quotes — 全部监控 ETF 最新行情（按 config 顺序）。
+// 与 /api/quotes（指数）/api/board-quotes（板块）对称，供 ETF 看板卡片渲染。
+func (s *Server) handleETFQuotes(w http.ResponseWriter, r *http.Request) {
+	quotes := s.wd.LatestETFs()
+	if quotes == nil {
+		quotes = []model.Quote{}
+	}
+	writeJSON(w, quotes)
+}
+
+// handleETFGroups GET /api/etf-groups — 市场热门 ETF 组合（按 config.etf_groups 分组 + 实时行情）。
+// 与 /api/etf-quotes（自监控固定 ETF）的区别：这里按类别分组展示各类代表 ETF，
+// 纯看盘不告警。汇总所有组 secid 去重后一次腾讯批量拉行情，再按 config 顺序分组返回。
+// 行情失败降级：返回分组结构（quotes 为空），前端展示组名+占位提示。
+func (s *Server) handleETFGroups(w http.ResponseWriter, r *http.Request) {
+	groups := s.cfg.ETFGroups
+	if len(groups) == 0 {
+		writeJSON(w, []any{})
+		return
+	}
+	type groupResp struct {
+		Name   string        `json:"name"`
+		Desc   string        `json:"desc"`
+		Quotes []model.Quote `json:"quotes"`
+	}
+	v, err := marketCache.GetOrSet("etf-groups", source.TTLQuotes, func() (any, error) {
+		// 汇总所有组 secid 去重（同一 ETF 可能出现在多组，批量拉一次）
+		seen := map[string]bool{}
+		var all []string
+		nameBySecid := map[string]string{}
+		for _, g := range groups {
+			for _, e := range g.ETFs {
+				if e.SecID == "" || seen[e.SecID] {
+					continue
+				}
+				seen[e.SecID] = true
+				all = append(all, e.SecID)
+				if e.Name != "" {
+					nameBySecid[e.SecID] = e.Name
+				}
+			}
+		}
+		quotes, qerr := source.FetchETFQuotes(r.Context(), all)
+		bySecid := map[string]model.Quote{}
+		if qerr == nil {
+			for _, q := range quotes {
+				bySecid[q.SecID] = q
+			}
+		} else {
+			log.Printf("[Web] ETF 组合行情失败，降级返回组结构: %v", qerr)
+		}
+		// 按 config 顺序分组，用 config 显示名覆盖（腾讯返回的中文名也准，但 config 更可控）
+		out := make([]groupResp, 0, len(groups))
+		for _, g := range groups {
+			gr := groupResp{Name: g.Name, Desc: g.Desc, Quotes: []model.Quote{}}
+			for _, e := range g.ETFs {
+				if q, ok := bySecid[e.SecID]; ok {
+					if e.Name != "" {
+						q.Name = e.Name
+					}
+					gr.Quotes = append(gr.Quotes, q)
+				}
+			}
+			out = append(out, gr)
+		}
+		// 行情失败也返回（降级），不报错
+		return out, nil
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	grs, _ := v.([]groupResp)
+	if grs == nil {
+		grs = []groupResp{}
+	}
+	writeJSON(w, grs)
 }
 
 // handleUSOverview GET /api/us/overview — 三大指数 + 11 板块（一次批量）。

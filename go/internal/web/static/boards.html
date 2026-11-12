@@ -4,13 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KILLER · A股板块</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/market.css">
 <style>
   /* 成分股表：名称列左对齐（默认规则只放前两列） */
   #detail th:nth-child(3), #detail td:nth-child(3) { text-align: left; }
   #detail .card, #watchCards .card { cursor: pointer; }
-</style>
-</head>
+</style></head>
 <body>
 <header>
   <h1>KILLER<span class="en">A股板块走势</span></h1>
@@ -20,8 +22,8 @@
 
 <main>
   <section id="watchSec" style="display:none">
-    <h2 style="font-size:15px;font-weight:600;margin-bottom:12px">板块监控
-      <span style="color:var(--muted);font-weight:400;font-size:12px">（config.yaml boards 配置 · 与大盘监控页同步）</span>
+    <h2 class="sec-title">板块监控
+      <span class="hint">（config.yaml boards 配置 · 与大盘监控页同步）</span>
     </h2>
     <div class="cards" id="watchCards"></div>
   </section>
@@ -37,7 +39,7 @@
       <button id="sortDesc" class="on">领涨优先</button>
       <button id="sortAsc">领跌优先</button>
     </div>
-    <span style="color:var(--muted);font-size:12px">60 秒自动刷新</span>
+    <span class="hint">60 秒自动刷新</span>
   </div>
 
   <div class="panel">
@@ -156,7 +158,7 @@ function renderBoardMembers(list) {
       <td><b>${w}</b></td>
     </tr>`;
   }).join("") || `<tr><td colspan="8" class="empty">暂无成分股</td></tr>`;
-  $("bdNote").textContent = "权重 = 个股流通市值 ÷ 成分股合计流通市值（近似口径；东财未发布板块指数真实权重）";
+  $("bdNote").textContent = "权重 = 个股流通市值 ÷ 成分股合计流通市值（近似口径；板块指数真实权重不对外发布）";
 }
 
 function render(boards) {

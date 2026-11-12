@@ -25,19 +25,145 @@ indices:
   - secid: "1.000688"
     name: "科创50"
 
-# --- 监控的概念/行业板块（东财 secid: 90.BKxxxx）---
-# 板块名是东财板块的实际名称，可按喜好改显示名；secid 用 /api/boards?kind=concept 查询
+# --- 监控的概念/行业板块（腾讯板块代码 pt0xxx）---
+# 板块名按喜好改显示名；secid 用 /api/boards?kind=concept 查询腾讯板块代码
 boards:
-  - secid: "90.BK1128"
-    name: "CPO概念"       # 光模块/CPO
-  - secid: "90.BK0877"
-    name: "PCB"           # 印制电路板
-  - secid: "90.BK1137"
-    name: "存储芯片"
-  - secid: "90.BK1134"
-    name: "算力概念"      # 即「国产算力」口径
-  - secid: "90.BK1326"
-    name: "半导体设备"    # 即「半导体材料与设备」口径
+  - secid: "pt02GN2211"
+    name: "CPO概念"       # 共封装光模块(CPO)
+  - secid: "pt02101284"
+    name: "PCB"           # PCB概念
+  - secid: "pt02GN2124"
+    name: "存储芯片"      # 存储器
+  - secid: "pt02GN2006"
+    name: "算力概念"      # 东数西算/算力
+  - secid: "pt02GN2328"
+    name: "半导体设备"    # 半导体设备概念
+
+# --- 监控的 A股 ETF（secid：1.5xxxxx 沪市 / 0.159xxxx 深市）---
+# ETF 是基金，波动通常小于指数和个股，阈值用 etf_change_pct 独立配置（默认 2%）
+etfs:
+  - secid: "1.510300"
+    name: "沪深300ETF"
+  - secid: "0.159915"
+    name: "创业板ETF"
+  - secid: "1.512880"
+    name: "证券ETF"
+  - secid: "1.510050"
+    name: "上证50ETF"
+  - secid: "1.588000"
+    name: "科创50ETF"
+  - secid: "1.510500"
+    name: "中证500ETF"
+  - secid: "0.159901"
+    name: "深100ETF"
+  - secid: "1.512000"
+    name: "券商ETF"
+
+# --- 市场热门 ETF 组合（按类别分组展示，不参与告警巡检，纯看盘）---
+# 与上方 etfs（自监控固定列表）的区别：这里按主题分组展示各类代表 ETF，
+# 点击卡片可看详情（日K/分时），方便横向比较同类 ETF 强弱。
+# 同一只 ETF 可同时出现在 etfs 自监控列表与某 etf_groups 组合中。
+# secid 规则同 etfs：1.5xxxxx 沪市 / 0.159xxxx 深市（腾讯批量行情通吃，含跨境/债券/商品）
+etf_groups:
+  - name: "宽基指数"
+    desc: "覆盖全市场的规模指数 ETF"
+    etfs:
+      - secid: "1.510300"
+        name: "沪深300ETF"
+      - secid: "1.510500"
+        name: "中证500ETF"
+      - secid: "0.159915"
+        name: "创业板ETF"
+      - secid: "1.588000"
+        name: "科创50ETF"
+      - secid: "1.510050"
+        name: "上证50ETF"
+      - secid: "1.563000"
+        name: "中证A50ETF"
+      - secid: "1.512100"
+        name: "中证1000ETF"
+      - secid: "0.159901"
+        name: "深100ETF"
+
+  - name: "行业主题"
+    desc: "聚焦细分行业或主题的 ETF"
+    etfs:
+      - secid: "1.512480"
+        name: "半导体ETF"
+      - secid: "1.512760"
+        name: "芯片ETF"
+      - secid: "1.512880"
+        name: "证券ETF"
+      - secid: "1.512800"
+        name: "银行ETF"
+      - secid: "1.512010"
+        name: "医药ETF"
+      - secid: "0.159928"
+        name: "消费ETF"
+      - secid: "1.515030"
+        name: "新能源车ETF"
+      - secid: "1.515790"
+        name: "光伏ETF"
+      - secid: "1.512660"
+        name: "军工ETF"
+      - secid: "1.512690"
+        name: "酒ETF"
+
+  - name: "跨境QDII"
+    desc: "投资海外市场的跨境 ETF"
+    etfs:
+      - secid: "1.513100"
+        name: "纳指ETF"
+      - secid: "1.513500"
+        name: "标普500ETF"
+      - secid: "1.513130"
+        name: "恒生科技ETF"
+      - secid: "1.510900"
+        name: "H股ETF"
+      - secid: "1.513520"
+        name: "日经ETF"
+      - secid: "1.513080"
+        name: "法国ETF"
+      - secid: "1.513030"
+        name: "德国ETF"
+
+  - name: "商品"
+    desc: "跟踪大宗商品价格的 ETF"
+    etfs:
+      - secid: "1.518880"
+        name: "黄金ETF"
+      - secid: "0.159985"
+        name: "豆粕ETF"
+
+  - name: "债券"
+    desc: "跟踪债券指数的固定收益 ETF"
+    etfs:
+      - secid: "1.511010"
+        name: "国债ETF"
+      - secid: "1.511260"
+        name: "十年国债ETF"
+      - secid: "1.511220"
+        name: "城投债ETF"
+      - secid: "1.511380"
+        name: "可转债ETF"
+
+# --- 监控的全球指数/大宗商品（新浪 znb_ 全球指数 / hf_ 商品期货）---
+# 显示在大盘监控首页，加在指数（科创50）之后
+globals:
+  - secid: "hf_CL"
+    name: "石油（WTI原油）"
+  - secid: "znb_NKY"
+    name: "日经225"
+  - secid: "znb_KOSPI"
+    name: "韩国综指"
+  - secid: "hf_GC"
+    name: "黄金（纽约金）"
+  - secid: "znb_NDX"
+    name: "纳斯达克100"
+  - secid: "hkHSI"
+    name: "恒生指数"
+  - secid: "hkHSTECH"
+    name: "恒生科技"
 
 # --- 监控 ---
 monitoring:
@@ -47,7 +173,17 @@ monitoring:
     change_pct: 1.0           # 指数涨跌幅超过 ±1% 告警
     amplitude_pct: 1.5        # 当日振幅超过 1.5% 告警
     board_change_pct: 2.0     # 板块涨跌幅超过 ±2% 告警（板块波动大于指数，单独设阈值）
+    etf_change_pct: 2.0       # ETF 涨跌幅超过 ±2% 告警（基金波动小，独立阈值）
     cooldown_minutes: 30      # 同一标的同类告警冷却时间（分钟）
+
+# --- 模拟交易系统 ---
+trading:
+  enabled: true                 # 是否启用交易系统
+  data_dir: "D:\\CloudDriver\\EVO\\killer"  # 交易数据持久化目录（网盘同步）
+  initial_cash: 1000000         # 初始资金（元）
+  commission_rate: 0.00025      # 佣金费率（双边，万2.5）
+  min_commission: 5.0           # 最低佣金（元）
+  stamp_tax_rate: 0.0005        # 印花税（仅卖出，万5）
 
 logging:
   level: INFO                 # DEBUG | INFO | WARNING | ERROR

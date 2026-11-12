@@ -16,8 +16,8 @@ func TestEvaluateBoardChangeThreshold(t *testing.T) {
 	cfg := config.Default()
 	cfg.Indices = []config.Index{{SecID: "1.000001", Name: "上证指数"}}
 	cfg.Boards = []config.Index{
-		{SecID: "90.BK1128", Name: "CPO概念"},
-		{SecID: "90.BK0877", Name: "PCB"},
+		{SecID: "pt02GN2211", Name: "CPO概念"},
+		{SecID: "pt02101284", Name: "PCB"},
 	}
 
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
@@ -29,8 +29,8 @@ func TestEvaluateBoardChangeThreshold(t *testing.T) {
 	w := &Watchdog{cfg: cfg, store: st, latest: map[string]model.Quote{}}
 	quotes := []model.Quote{
 		{SecID: "1.000001", Name: "上证指数", Pct: 1.5, Price: 3300},
-		{SecID: "90.BK1128", Name: "CPO概念", Pct: 1.5, Price: 1000},
-		{SecID: "90.BK0877", Name: "PCB", Pct: 2.5, Price: 1000},
+		{SecID: "pt02GN2211", Name: "CPO概念", Pct: 1.5, Price: 1000},
+		{SecID: "pt02101284", Name: "PCB", Pct: 2.5, Price: 1000},
 	}
 
 	fired := w.evaluate(quotes)
@@ -44,10 +44,10 @@ func TestEvaluateBoardChangeThreshold(t *testing.T) {
 	} else if a.Threshold != cfg.Monitoring.Alert.ChangePct {
 		t.Errorf("指数告警阈值=%v want %v", a.Threshold, cfg.Monitoring.Alert.ChangePct)
 	}
-	if _, ok := got["90.BK1128"]; ok {
+	if _, ok := got["pt02GN2211"]; ok {
 		t.Error("板块 1.5% 未达板块阈值 2%，不应触发告警")
 	}
-	if a, ok := got["90.BK0877"]; !ok {
+	if a, ok := got["pt02101284"]; !ok {
 		t.Error("板块 2.5% 应超过板块阈值 2% 触发告警")
 	} else if a.Threshold != cfg.Monitoring.Alert.BoardChangePct {
 		t.Errorf("板块告警阈值=%v want %v", a.Threshold, cfg.Monitoring.Alert.BoardChangePct)

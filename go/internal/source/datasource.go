@@ -30,7 +30,8 @@ const (
 	FeatKline     = "kline"       // 日K线
 	FeatBoards    = "boards"      // A股板块
 	FeatStocks    = "stocks"      // A股个股列表
-	FeatBatch     = "batch"       // 批量行情（自选/纳指/美股板块）
+	FeatETFs      = "etfs"        // A股 ETF 列表
+	FeatBatch     = "batch"       // 批量行情（自选/纳指/美股板块/ETF 监控）
 	FeatUSStocks  = "us_stocks"   // 美股活跃榜
 	FeatNDXMember = "ndx_members" // 纳指100成分表
 )
@@ -59,16 +60,19 @@ type SourceMeta struct {
 }
 
 // Features 全部功能定义（顺序即看板展示顺序；Sources[0] 为默认首选）。
-// 默认路由原则（2026-11-12 东财 push2 全挂后调整）：东财降兜底，
-// 新浪/腾讯优先——但 quotes 保持东财首选，因 90.BK 板块行情仅东财可报价，
-// 换源会导致看门狗板块行情永久缺失。
+// 默认路由原则（2026-11-13 板块彻底脱离东财后调整）：
+// 板块（列表/行情/成分股/走势）全部走腾讯 pt 代码，东财仅作兜底；
+// quotes 指数行情仍东财首选（指数 push2 可用性优于板块 push2）。
+// ETF 列表走东财 clist（限流期会失败，与 A股 stocks 同命运）；
+// ETF 行情（监控固定列表）走批量行情路由（腾讯通吃 A股/美股/ETF）。
 var Features = []FeatureMeta{
 	{FeatQuotes, "大盘指数行情", []string{SrcEastmoney, SrcSina}},
-	{FeatIntraday, "当日分时（1分钟K）", []string{SrcEastmoney}},
-	{FeatKline, "日K线", []string{SrcSina, SrcEastmoney}},
-	{FeatBoards, "A股板块", []string{SrcSina, SrcEastmoney}},
+	{FeatIntraday, "当日分时（1分钟K）", []string{SrcEastmoney, SrcTencent}},
+	{FeatKline, "日K线", []string{SrcSina, SrcEastmoney, SrcTencent}},
+	{FeatBoards, "A股板块", []string{SrcTencent, SrcSina, SrcEastmoney}},
 	{FeatStocks, "A股个股列表", []string{SrcSina, SrcEastmoney}},
-	{FeatBatch, "批量行情（自选/纳指/美股板块）", []string{SrcTencent, SrcSina, SrcEastmoney}},
+	{FeatETFs, "A股 ETF 列表", []string{SrcEastmoney}},
+	{FeatBatch, "批量行情（自选/纳指/美股板块/ETF）", []string{SrcTencent, SrcSina, SrcEastmoney}},
 	{FeatUSStocks, "美股成交活跃榜", []string{SrcEastmoney}},
 	{FeatNDXMember, "纳斯达克100成分表", []string{SrcYfiua}},
 }
@@ -76,11 +80,11 @@ var Features = []FeatureMeta{
 // Sources 全部数据源定义。
 var Sources = []SourceMeta{
 	{SrcEastmoney, "东方财富", "push2/push2his 行情接口（功能最全，2026-11-12 实测连接失败，降为兜底）",
-		[]string{FeatQuotes, FeatIntraday, FeatKline, FeatBoards, FeatStocks, FeatBatch, FeatUSStocks}},
+		[]string{FeatQuotes, FeatIntraday, FeatKline, FeatBoards, FeatStocks, FeatETFs, FeatBatch, FeatUSStocks}},
 	{SrcSina, "新浪财经", "hq/Market_Center/板块接口（GBK 编码，行情/日K/板块/列表首选）",
 		[]string{FeatQuotes, FeatKline, FeatBoards, FeatStocks, FeatBatch}},
-	{SrcTencent, "腾讯财经", "qt.gtimg.cn/web.ifzq.gtimg.cn（批量行情首选，A股/美股/ETF/指数通吃；行情/分时/K线已实测待接线）",
-		[]string{FeatBatch}},
+	{SrcTencent, "腾讯财经", "qt.gtimg.cn/ifzq/proxy（批量行情+板块+成分股+分时/K线首选，A股/美股/ETF/板块通吃）",
+		[]string{FeatIntraday, FeatKline, FeatBatch, FeatBoards}},
 	{SrcYfiua, "GitHub Pages 成分表", "yfiua/index-constituents（纳指100成分，月度更新）",
 		[]string{FeatNDXMember}},
 }

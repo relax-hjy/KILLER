@@ -8,8 +8,8 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
@@ -72,19 +72,25 @@ func New(cfg *config.Config, st *store.Store) (*Watchdog, error) {
 	}, nil
 }
 
-// secids 返回监控标的列表（指数 + 板块，一次批量拉取）。
+// secids 返回监控标的列表（指数 + 板块 + ETF + 全球，一次批量拉取）。
 func (w *Watchdog) secids() []string {
-	out := make([]string, 0, len(w.cfg.Indices)+len(w.cfg.Boards))
+	out := make([]string, 0, len(w.cfg.Indices)+len(w.cfg.Boards)+len(w.cfg.ETFs)+len(w.cfg.Globals))
 	for _, ix := range w.cfg.Indices {
 		out = append(out, ix.SecID)
 	}
 	for _, b := range w.cfg.Boards {
 		out = append(out, b.SecID)
 	}
+	for _, e := range w.cfg.ETFs {
+		out = append(out, e.SecID)
+	}
+	for _, g := range w.cfg.Globals {
+		out = append(out, g.SecID)
+	}
 	return out
 }
 
-// nameOf secid → 配置中的显示名（先查指数再查板块）。
+// nameOf secid → 配置中的显示名（先查指数再查板块再查 ETF 再查全球）。
 func (w *Watchdog) nameOf(secid string) string {
 	for _, ix := range w.cfg.Indices {
 		if ix.SecID == secid {
@@ -96,34 +102,120 @@ func (w *Watchdog) nameOf(secid string) string {
 			return b.Name
 		}
 	}
+	for _, e := range w.cfg.ETFs {
+		if e.SecID == secid {
+			return e.Name
+		}
+	}
+	for _, g := range w.cfg.Globals {
+		if g.SecID == secid {
+			return g.Name
+		}
+	}
 	return secid
 }
 
-// isBoard 判断是否板块标的（东财板块市场号 90）。
+// isBoard 判断是否板块标的（腾讯板块代码 pt 前缀，如 pt02003891）。
 func isBoard(secid string) bool {
-	return strings.HasPrefix(secid, "90.")
+	return source.IsBoardSecid(secid)
 }
 
-// fetchQuotes 按数据源路由拉取指数行情（首选失败切另一源）。
+// isETF 判断是否 ETF 标的（沪 1.5xxxxx / 深 0.159xxxx 等，非 pt 板块）。
+func isETF(secid string) bool {
+	if isBoard(secid) {
+		return false
+	}
+	return source.IsETFSecid(secid)
+}
+
+// fetchQuotes 拉取指数 + 板块 + ETF + 全球行情。
+// 指数按数据源路由（东财/新浪），板块固定走腾讯（pt 代码仅腾讯可报价），
+// ETF 走批量行情路由（腾讯通吃 A股/美股/ETF，新浪 hq 兜底），
+// 全球（石油/日韩/黄金）走新浪 znb_/hf_。
+// 四类分别拉取、合并返回；任一类失败不拖累另一类。
 func (w *Watchdog) fetchQuotes(ctx context.Context) ([]model.Quote, error) {
-	// 路由顺序：eastmoney → primary/fallback 对调
-	order := []source.Source{w.primary, w.fallback}
-	if source.GetRouting(source.FeatQuotes) == source.SrcSina && w.fallback != nil {
-		order = []source.Source{w.fallback, w.primary}
+	// 拆分标的：指数 / 板块 / ETF / 全球
+	var idxSecids, boardSecids, etfSecids, globalSecids []string
+	for _, id := range w.secids() {
+		switch {
+		case isBoard(id):
+			boardSecids = append(boardSecids, id)
+		case isETF(id):
+			etfSecids = append(etfSecids, id)
+		case source.IsGlobalSecid(id):
+			globalSecids = append(globalSecids, id)
+		default:
+			idxSecids = append(idxSecids, id)
+		}
 	}
+
+	var out []model.Quote
 	var lastErr error
-	for _, src := range order {
-		if src == nil {
-			continue
+
+	// 指数：路由顺序 eastmoney → primary/fallback 对调
+	if len(idxSecids) > 0 {
+		order := []source.Source{w.primary, w.fallback}
+		if source.GetRouting(source.FeatQuotes) == source.SrcSina && w.fallback != nil {
+			order = []source.Source{w.fallback, w.primary}
 		}
-		quotes, err := src.FetchQuotes(ctx, w.secids())
-		if err == nil {
-			return quotes, nil
+		for _, src := range order {
+			if src == nil {
+				continue
+			}
+			quotes, err := src.FetchQuotes(ctx, idxSecids)
+			if err == nil {
+				out = append(out, quotes...)
+				lastErr = nil
+				break
+			}
+			lastErr = err
+			log.Printf("[Watchdog] 指数源 %s 失败: %v", src.Name(), err)
 		}
-		lastErr = err
-		log.Printf("[Watchdog] 数据源 %s 失败: %v", src.Name(), err)
 	}
-	return nil, lastErr
+
+	// 板块：固定腾讯（pt 代码）
+	if len(boardSecids) > 0 {
+		if quotes, err := source.FetchBoardQuotes(ctx, boardSecids); err == nil {
+			out = append(out, quotes...)
+		} else {
+			log.Printf("[Watchdog] 板块行情失败: %v", err)
+			if lastErr == nil {
+				lastErr = err
+			}
+		}
+	}
+
+	// ETF：走批量行情路由（腾讯首选，通吃 A股/美股/ETF）
+	if len(etfSecids) > 0 {
+		if quotes, err := source.FetchETFQuotes(ctx, etfSecids); err == nil {
+			out = append(out, quotes...)
+		} else {
+			log.Printf("[Watchdog] ETF 行情失败: %v", err)
+			if lastErr == nil {
+				lastErr = err
+			}
+		}
+	}
+
+	// 全球（石油/日韩/黄金）：新浪 znb_/hf_
+	if len(globalSecids) > 0 {
+		if quotes, err := source.FetchGlobalQuotes(ctx, globalSecids); err == nil {
+			out = append(out, quotes...)
+		} else {
+			log.Printf("[Watchdog] 全球行情失败: %v", err)
+			if lastErr == nil {
+				lastErr = err
+			}
+		}
+	}
+
+	if len(out) == 0 {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("无可用行情")
+		}
+		return nil, lastErr
+	}
+	return out, nil
 }
 
 // CheckOnce 执行一轮巡检：拉行情 → 落库 → 阈值比对 → 触发告警。
@@ -144,6 +236,10 @@ func (w *Watchdog) CheckOnce(ctx context.Context) []model.Alert {
 	}
 	w.lastErr = ""
 	for _, q := range quotes {
+		// 用 config 配置的显示名覆盖数据源返回的原始名称（全球标的差异较大）
+		if nm := w.nameOf(q.SecID); nm != q.SecID {
+			q.Name = nm
+		}
 		w.latest[q.SecID] = q
 	}
 	w.mu.Unlock()
@@ -241,9 +337,12 @@ func (w *Watchdog) evaluate(quotes []model.Quote) []model.Alert {
 	var fired []model.Alert
 	for _, q := range quotes {
 		// 板块波动大于指数，涨跌幅用独立阈值（未配置时沿用全局）
+		// ETF 是基金，波动通常小于指数和个股，用独立阈值（未配置时沿用全局）
 		changeTh := ac.ChangePct
 		if isBoard(q.SecID) && ac.BoardChangePct > 0 {
 			changeTh = ac.BoardChangePct
+		} else if isETF(q.SecID) && ac.EtfChangePct > 0 {
+			changeTh = ac.EtfChangePct
 		}
 		type check struct {
 			alertType string
@@ -315,7 +414,7 @@ func (w *Watchdog) Start() {
 			}
 		}
 	}()
-	log.Printf("[Watchdog] 定时巡检已启动 (间隔=%s, 指数=%d 个, 板块=%d 个)", w.cfg.CheckInterval(), len(w.cfg.Indices), len(w.cfg.Boards))
+	log.Printf("[Watchdog] 定时巡检已启动 (间隔=%s, 指数=%d 个, 板块=%d 个, ETF=%d 个, 全球=%d 个)", w.cfg.CheckInterval(), len(w.cfg.Indices), len(w.cfg.Boards), len(w.cfg.ETFs), len(w.cfg.Globals))
 }
 
 // Stop 停止巡检。
@@ -325,13 +424,18 @@ func (w *Watchdog) Stop() {
 	log.Println("[Watchdog] 已停止")
 }
 
-// Latest 返回所有指数最新行情快照。
+// Latest 返回所有指数 + 全球标的最新行情快照（指数在前，全球追加在后）。
 func (w *Watchdog) Latest() []model.Quote {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	out := make([]model.Quote, 0, len(w.cfg.Indices))
+	out := make([]model.Quote, 0, len(w.cfg.Indices)+len(w.cfg.Globals))
 	for _, ix := range w.cfg.Indices {
 		if q, ok := w.latest[ix.SecID]; ok {
+			out = append(out, q)
+		}
+	}
+	for _, g := range w.cfg.Globals {
+		if q, ok := w.latest[g.SecID]; ok {
 			out = append(out, q)
 		}
 	}
@@ -351,6 +455,19 @@ func (w *Watchdog) LatestBoards() []model.Quote {
 	return out
 }
 
+// LatestETFs 返回所有监控 ETF 的最新行情快照。
+func (w *Watchdog) LatestETFs() []model.Quote {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]model.Quote, 0, len(w.cfg.ETFs))
+	for _, e := range w.cfg.ETFs {
+		if q, ok := w.latest[e.SecID]; ok {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
 // Status 返回巡检状态（供面板展示）。
 func (w *Watchdog) Status() map[string]any {
 	w.mu.Lock()
@@ -363,6 +480,8 @@ func (w *Watchdog) Status() map[string]any {
 		"trading_hours": tradingHours(time.Now()),
 		"monitored":     len(w.cfg.Indices),
 		"boards":        len(w.cfg.Boards),
+		"etfs":          len(w.cfg.ETFs),
+		"globals":       len(w.cfg.Globals),
 	}
 }
 

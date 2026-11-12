@@ -27,12 +27,13 @@ import (
 const (
 	tencentQuoteURL  = "https://qt.gtimg.cn/q=%s"
 	tencentKlineURL  = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,%d,qfq"
+	tencentNewKlineURL = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get?param=%s,day,,,%d,qfq"
 	tencentMinuteURL = "https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=%s"
 	tencentUA        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 )
 
-// tencentLineRe 匹配 `v_SYMBOL="字段串"` 行（美股代码含点号，如 usBRK.B）。
-var tencentLineRe = regexp.MustCompile(`v_([a-zA-Z0-9.]+)="([^"]*)"`)
+// tencentLineRe 匹配 `v_SYMBOL="字段串"` 行（美股代码含点号如 usBRK.B，港股指数含下划线如 hk_HSI）。
+var tencentLineRe = regexp.MustCompile(`v_([a-zA-Z0-9._]+)="([^"]*)"`)
 
 // TencentSource 腾讯财经数据源。
 type TencentSource struct{}
@@ -40,8 +41,9 @@ type TencentSource struct{}
 // Name 数据源标识。
 func (t *TencentSource) Name() string { return "tencent" }
 
-// tencentSymbol secid → 腾讯 symbol。不支持返回 ("", false)（如东财板块 90.BK）。
+// tencentSymbol secid → 腾讯 symbol。不支持返回 ("", false)。
 // 美股三大指数东财用 100.* 市场号，腾讯为专用码 usDJI/usNDX/usINX。
+// 板块 secid 用腾讯 pt 前缀（pt02003891 等），本身就是 symbol 直接透传。
 func tencentSymbol(secid string) (string, bool) {
 	switch {
 	case strings.HasPrefix(secid, "1."):
@@ -50,6 +52,10 @@ func tencentSymbol(secid string) (string, bool) {
 		return "sz" + secid[2:], true
 	case strings.HasPrefix(secid, "105."), strings.HasPrefix(secid, "106."), strings.HasPrefix(secid, "107."):
 		return "us" + secid[4:], true
+	case IsBoardSecid(secid):
+		return secid, true // 腾讯板块代码即 symbol
+	case IsHKIndexSecid(secid):
+		return secid, true // 港股指数（hkHSI 恒生 / hkHSTECH 恒生科技），腾讯 symbol 即 secid
 	}
 	switch secid {
 	case "100.DJIA":
@@ -222,13 +228,14 @@ func (t *TencentSource) FetchQuotes(ctx context.Context, secids []string) ([]mod
 
 type tencentKlineRoot struct {
 	Data map[string]struct {
-		Day    [][]string `json:"day"`
-		Qfqday [][]string `json:"qfqday"`
+		Day    [][]json.RawMessage `json:"day"`
+		Qfqday [][]json.RawMessage `json:"qfqday"`
 	} `json:"data"`
 }
 
 // parseTencentKline 解析日K响应。条目格式 [日期,开,收,高,低,量]，升序。
-// 个股返回 qfqday（前复权），指数返回 day，两者都试。
+// 个股返回 qfqday（前复权），指数/板块返回 day，两者都试。
+// newfqkline 端点（板块）每条末尾带额外字段（对象/数字），用 RawMessage 容忍。
 func parseTencentKline(body []byte, sym string) ([]model.Kline, error) {
 	var root tencentKlineRoot
 	if err := json.Unmarshal(body, &root); err != nil {
@@ -247,12 +254,12 @@ func parseTencentKline(body []byte, sym string) ([]model.Kline, error) {
 		if len(r) < 6 {
 			continue
 		}
-		k := model.Kline{Date: r[0]}
-		k.Open, _ = strconv.ParseFloat(r[1], 64)
-		k.Close, _ = strconv.ParseFloat(r[2], 64)
-		k.High, _ = strconv.ParseFloat(r[3], 64)
-		k.Low, _ = strconv.ParseFloat(r[4], 64)
-		k.Volume, _ = strconv.ParseFloat(r[5], 64)
+		k := model.Kline{Date: rawStr(r[0])}
+		k.Open = rawFlt(r[1])
+		k.Close = rawFlt(r[2])
+		k.High = rawFlt(r[3])
+		k.Low = rawFlt(r[4])
+		k.Volume = rawFlt(r[5])
 		out = append(out, k)
 	}
 	if len(out) == 0 {
@@ -261,13 +268,40 @@ func parseTencentKline(body []byte, sym string) ([]model.Kline, error) {
 	return out, nil
 }
 
+// rawStr 解析 RawMessage 为字符串（去掉引号）。
+func rawStr(raw json.RawMessage) string {
+	var s string
+	_ = json.Unmarshal(raw, &s)
+	return s
+}
+
+// rawFlt 解析 RawMessage 为 float64（兼容数字与字符串两种形态，如 "1402.30" / 1402.30）。
+func rawFlt(raw json.RawMessage) float64 {
+	var f float64
+	if err := json.Unmarshal(raw, &f); err == nil {
+		return f
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		if v, err2 := strconv.ParseFloat(s, 64); err2 == nil {
+			return v
+		}
+	}
+	return 0
+}
+
 // FetchKline 日K线（Source 接口，接线点在 server.handleKline）。
+// 板块 secid（pt 前缀）走 newfqkline 端点（fqkline 对板块仅返回 1 天）。
 func (t *TencentSource) FetchKline(ctx context.Context, secid string, limit int) ([]model.Kline, error) {
 	sym, ok := tencentSymbol(secid)
 	if !ok {
 		return nil, fmt.Errorf("tencent 不支持 secid %s", secid)
 	}
-	body, err := tencentGet(ctx, fmt.Sprintf(tencentKlineURL, sym, limit))
+	url := fmt.Sprintf(tencentKlineURL, sym, limit)
+	if IsBoardSecid(secid) {
+		url = fmt.Sprintf(tencentNewKlineURL, sym, limit)
+	}
+	body, err := tencentGet(ctx, url)
 	if err != nil {
 		return nil, err
 	}

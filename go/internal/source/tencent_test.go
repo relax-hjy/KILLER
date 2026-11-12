@@ -13,7 +13,7 @@ const (
 )
 
 // TestTencentSymbolMapping 验证 secid → 腾讯 symbol 映射：
-// 沪深加 sh/sz 前缀、美股加 us 前缀、美股三大指数特例、板块不支持。
+// 沪深加 sh/sz 前缀、美股加 us 前缀、美股三大指数特例、板块 pt 代码透传。
 func TestTencentSymbolMapping(t *testing.T) {
 	cases := []struct {
 		secid string
@@ -28,7 +28,8 @@ func TestTencentSymbolMapping(t *testing.T) {
 		{"100.DJIA", "usDJI", true},
 		{"100.NDX", "usNDX", true},
 		{"100.SPX", "usINX", true},
-		{"90.BK1128", "", false}, // 东财板块腾讯不支持
+		{"pt02003891", "pt02003891", true}, // 腾讯板块代码即 symbol
+		{"90.BK1128", "", false},          // 东财板块代码腾讯不支持
 	}
 	for _, c := range cases {
 		got, ok := tencentSymbol(c.secid)

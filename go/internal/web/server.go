@@ -4,9 +4,12 @@ package web
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"killer/internal/monitor"
 	"killer/internal/source"
 	"killer/internal/store"
+	"killer/internal/trading"
 )
 
 //go:embed static
@@ -23,12 +27,14 @@ var staticFS embed.FS
 
 // Server HTTP 服务。
 type Server struct {
-	cfg       *config.Config
-	wd        *monitor.Watchdog
-	st        *store.Store
-	klineEM   source.Source // 东财 K 线（也是分时唯一源）
-	klineSina source.Source // 新浪日 K（仅 A 股 sh/sz）
-	mux       *http.ServeMux
+	cfg           *config.Config
+	wd            *monitor.Watchdog
+	st            *store.Store
+	trade         *trading.Engine
+	klineEM       source.Source // 东财 K 线（也是分时唯一源）
+	klineSina     source.Source // 新浪日 K（仅 A 股 sh/sz）
+	klineTencent  source.Source // 腾讯 K 线/分时（板块 pt 代码、美股指数）
+	mux           *http.ServeMux
 }
 
 // New 构建路由。
@@ -41,7 +47,21 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, wd: wd, st: st, klineEM: kl, klineSina: klSina, mux: http.NewServeMux()}
+	klTencent, err := source.New("tencent")
+	if err != nil {
+		return nil, err
+	}
+
+	// 初始化交易引擎（数据持久化到独立目录）
+	var tradeEng *trading.Engine
+	if cfg.Trading.Enabled {
+		tradeEng, err = initTrading(cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	s := &Server{cfg: cfg, wd: wd, st: st, trade: tradeEng, klineEM: kl, klineSina: klSina, klineTencent: klTencent, mux: http.NewServeMux()}
 
 	sub, _ := fs.Sub(staticFS, "static")
 	// 禁缓存：静态页内嵌于二进制，改版后必须让浏览器拿到最新文件
@@ -60,6 +80,9 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	// 市场扩展
 	s.mux.HandleFunc("GET /api/boards", s.handleBoards)
 	s.mux.HandleFunc("GET /api/stocks", s.handleStocks)
+	s.mux.HandleFunc("GET /api/etfs", s.handleETFs)
+	s.mux.HandleFunc("GET /api/etf-quotes", s.handleETFQuotes)
+	s.mux.HandleFunc("GET /api/etf-groups", s.handleETFGroups)
 	s.mux.HandleFunc("GET /api/us/overview", s.handleUSOverview)
 	s.mux.HandleFunc("GET /api/us/stocks", s.handleUSStocks)
 	s.mux.HandleFunc("GET /api/ndx", s.handleNDX)
@@ -72,7 +95,38 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	s.mux.HandleFunc("POST /api/datasources/test", s.handleDataSourceTest)
 	s.mux.HandleFunc("GET /api/datasources/routing", s.handleRouting)
 	s.mux.HandleFunc("POST /api/datasources/routing", s.handleRouting)
+
+	// 交易系统
+	if tradeEng != nil {
+		s.mux.HandleFunc("GET /api/trade/account", s.handleTradeAccount)
+		s.mux.HandleFunc("GET /api/trade/positions", s.handleTradePositions)
+		s.mux.HandleFunc("GET /api/trade/orders", s.handleTradeOrders)
+		s.mux.HandleFunc("POST /api/trade/orders", s.handleTradePlace)
+		s.mux.HandleFunc("DELETE /api/trade/orders", s.handleTradeCancel)
+		s.mux.HandleFunc("GET /api/trade/trades", s.handleTradeTrades)
+		s.mux.HandleFunc("GET /api/trade/signal", s.handleTradeSignal)
+		s.mux.HandleFunc("POST /api/trade/backtest", s.handleTradeBacktest)
+		s.mux.HandleFunc("GET /api/trade/strategies", s.handleTradeStrategies)
+	}
 	return s, nil
+}
+
+// initTrading 初始化交易引擎：确保数据目录存在并打开交易数据库。
+func initTrading(cfg *config.Config) (*trading.Engine, error) {
+	dataDir := cfg.Trading.DataDir
+	if dataDir == "" {
+		dataDir = `D:\CloudDriver\EVO\killer`
+	}
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return nil, fmt.Errorf("创建交易数据目录失败: %w", err)
+	}
+	dbPath := filepath.Join(dataDir, "trading.db")
+	ts, err := trading.Open(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[Trading] 交易数据目录: %s", dataDir)
+	return trading.New(cfg, ts), nil
 }
 
 // Serve 启动 HTTP 服务（阻塞）。
@@ -138,13 +192,27 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleIntraday GET /api/intraday?secid=1.000001 — 当日分时（数据源分钟 K，休市/重启均可看全天）。
+// 板块 secid（pt 前缀）走腾讯；其余先按路由尝试东财（首选），东财失败时降级腾讯
+// （腾讯 minute/query 对 A股/ETF/美股指数通吃，2026-11-13 实测）——
+// 这层兜底使东财限流期个股/ETF 分时图不再 502。
 func (s *Server) handleIntraday(w http.ResponseWriter, r *http.Request) {
 	secid := r.URL.Query().Get("secid")
 	if secid == "" {
 		http.Error(w, "missing secid", http.StatusBadRequest)
 		return
 	}
-	klines, err := s.klineEM.FetchMinuteKline(r.Context(), secid)
+	var klines []model.Kline
+	var err error
+	if source.IsBoardSecid(secid) {
+		klines, err = s.klineTencent.FetchMinuteKline(r.Context(), secid)
+	} else {
+		// 东财首选；失败降级腾讯（A股/ETF 通吃）
+		klines, err = s.klineEM.FetchMinuteKline(r.Context(), secid)
+		if err != nil {
+			log.Printf("[Web] 分时东财失败 %s，降级腾讯: %v", secid, err)
+			klines, err = s.klineTencent.FetchMinuteKline(r.Context(), secid)
+		}
+	}
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
@@ -161,7 +229,8 @@ func isUSSecid(secid string) bool {
 }
 
 // handleKline GET /api/kline?secid=1.000001&limit=120 — 日 K 走势。
-// 按路由顺序尝试数据源；美股 secid 固定东财（新浪 getKLineData 仅支持 sh/sz）。
+// 板块 secid（pt 前缀）走腾讯；其余按路由顺序尝试（东财/新浪）。
+// 美股 secid 固定东财（新浪 getKLineData 仅支持 sh/sz）。
 func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 	secid := r.URL.Query().Get("secid")
 	if secid == "" {
@@ -172,6 +241,21 @@ func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 500 {
 		limit = 120
 	}
+
+	// 板块 secid → 腾讯
+	if source.IsBoardSecid(secid) {
+		klines, err := s.klineTencent.FetchKline(r.Context(), secid, limit)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		if klines == nil {
+			klines = []model.Kline{}
+		}
+		writeJSON(w, klines)
+		return
+	}
+
 	order := []source.Source{s.klineEM, s.klineSina}
 	if source.GetRouting(source.FeatKline) == source.SrcSina && !isUSSecid(secid) {
 		order = []source.Source{s.klineSina, s.klineEM}

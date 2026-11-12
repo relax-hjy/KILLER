@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KILLER · 模拟交易</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/market.css">
+<style>
+  .acct-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 12px; margin-bottom: 20px; }
+  .acct-cards .card .k { font-size: var(--font-meta); color: var(--text-tertiary); margin-bottom: 6px; }
+  .acct-cards .card .v { font-family: var(--font-display); font-size: 24px; font-weight: 620; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .order-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .order-form input, .order-form select { padding: 6px 10px; }
+  .order-form .btn { margin-left: auto; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip {
+    display: inline-flex; align-items: center; height: 28px; padding: 0 12px;
+    border-radius: var(--radius-md); border: 1px solid var(--border-default);
+    color: var(--text-tertiary); cursor: pointer; font-size: var(--font-table); background: var(--bg-subtle);
+    transition: color var(--motion-fast) ease, background var(--motion-fast) ease, border-color var(--motion-fast) ease;
+  }
+  .chip:hover { color: var(--text-secondary); background: var(--bg-hover); border-color: var(--border-strong); }
+  .chip.on { color: var(--text-primary); background: var(--bg-selected); border-color: var(--border-strong); font-weight: 620; }
+  .sig-badge { display: inline-block; padding: 1px 8px; border-radius: var(--radius-sm); font-size: var(--font-meta); font-weight: 520; border: 1px solid transparent; }
+  .sig-buy { background: var(--danger-subtle); color: var(--up); border-color: rgba(217,107,114,.24); }
+  .sig-sell { background: var(--success-subtle); color: var(--down); border-color: rgba(101,185,143,.24); }
+  .sig-hold { background: rgba(255,255,255,.07); color: var(--text-tertiary); border-color: var(--border-default); }
+  .bt-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 12px; margin-bottom: 16px; }
+  .bt-stats .item { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px 14px; }
+  .bt-stats .item .k { font-size: var(--font-meta); color: var(--text-tertiary); }
+  .bt-stats .item .v { font-size: 18px; font-weight: 620; letter-spacing: -0.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .muted-note { font-size: var(--font-meta); color: var(--text-tertiary); margin-top: 6px; line-height: 1.6; }
+</style></head>
+<body>
+<header>
+  <h1>KILLER<span class="en">模拟交易</span></h1>
+  <nav></nav>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <!-- 账户概览 -->
+  <section>
+    <h2 class="sec-title">账户概览 <span class="hint">模拟资金 · 数据持久化于网盘同步目录</span></h2>
+    <div class="acct-cards" id="acctCards">
+      <div class="card"><div class="k">总资产</div><div class="v">—</div></div>
+      <div class="card"><div class="k">可用现金</div><div class="v">—</div></div>
+      <div class="card"><div class="k">持仓市值</div><div class="v">—</div></div>
+      <div class="card"><div class="k">累计盈亏</div><div class="v">—</div></div>
+    </div>
+  </section>
+
+  <div class="tabs" style="margin-bottom:16px">
+    <button id="tabTrade" class="on">交易下单</button>
+    <button id="tabPos">持仓</button>
+    <button id="tabOrders">订单/成交</button>
+    <button id="tabSignal">策略信号</button>
+    <button id="tabBacktest">策略回测</button>
+  </div>
+
+  <!-- 交易下单 -->
+  <div id="secTrade">
+    <div class="panel">
+      <h2>下单</h2>
+      <div style="padding:16px">
+        <div class="order-form">
+          <input id="oCode" placeholder="代码，如 600519 / AAPL" style="width:140px">
+          <input id="oSecid" placeholder="secid（可留空自动补全）" style="width:160px">
+          <input id="oName" placeholder="名称（可留空）" style="width:140px">
+          <select id="oSide"><option value="buy">买入</option><option value="sell">卖出</option></select>
+          <select id="oType"><option value="market">市价单</option><option value="limit">限价单</option></select>
+          <input id="oPrice" placeholder="委托价（市价留空）" style="width:120px">
+          <input id="oQty" placeholder="数量" style="width:100px" type="number" min="1">
+          <button class="btn" id="btnPlace">提交下单</button>
+        </div>
+        <div class="muted-note">市价单按实时行情立即成交；限价单挂单，行情满足价格时自动撮合。买入 T+1（当日买入次日可卖，本模拟暂简化为即时可卖）。</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>挂单（限价单）</h2>
+      <table>
+        <thead><tr><th>ID</th><th>标的</th><th>方向</th><th>委托价</th><th>数量</th><th>时间</th><th class="nosort">操作</th></tr></thead>
+        <tbody id="pendingBody"><tr><td colspan="7" class="loading">加载中 …</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 持仓 -->
+  <div id="secPos" style="display:none">
+    <div class="panel">
+      <table>
+        <thead><tr><th>代码</th><th>名称</th><th>持仓量</th><th>成本价</th><th>现价</th><th>市值</th><th>浮动盈亏</th><th>盈亏率</th></tr></thead>
+        <tbody id="posBody"><tr><td colspan="8" class="loading">加载中 …</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 订单/成交 -->
+  <div id="secOrders" style="display:none">
+    <div class="panel">
+      <h2>成交记录</h2>
+      <table>
+        <thead><tr><th>标的</th><th>方向</th><th>价格</th><th>数量</th><th>金额</th><th>手续费</th><th>时间</th></tr></thead>
+        <tbody id="tradesBody"><tr><td colspan="7" class="loading">加载中 …</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>历史订单</h2>
+      <table>
+        <thead><tr><th>ID</th><th>标的</th><th>方向</th><th>类型</th><th>委托价</th><th>委托量</th><th>成交价</th><th>状态</th><th>时间</th></tr></thead>
+        <tbody id="ordersBody"><tr><td colspan="9" class="loading">加载中 …</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 策略信号 -->
+  <div id="secSignal" style="display:none">
+    <div class="chips" id="sigStrategy">
+      <span class="chip on" data-s="ma_cross">均线金叉</span>
+      <span class="chip" data-s="breakout">突破策略</span>
+      <span class="chip" data-s="rsi">RSI超买超卖</span>
+    </div>
+    <div class="panel">
+      <h2>信号标的 <span style="color:var(--muted);font-weight:400;font-size:12px">监控的指数 + 板块</span></h2>
+      <table>
+        <thead><tr><th>标的</th><th>类型</th><th>信号</th><th>触发价</th><th>说明</th></tr></thead>
+        <tbody id="sigBody"><tr><td colspan="5" class="loading">生成信号中 …</td></tr></tbody>
+      </table>
+      <div class="muted-note" style="padding:0 16px 12px">信号基于日K生成，仅供参考，不构成投资建议；可在交易下单页手动执行。</div>
+    </div>
+  </div>
+
+  <!-- 策略回测 -->
+  <div id="secBacktest" style="display:none">
+    <div class="panel">
+      <h2>回测设置</h2>
+      <div style="padding:16px">
+        <div class="order-form">
+          <select id="btStrategy">
+            <option value="ma_cross">均线金叉</option>
+            <option value="breakout">突破策略</option>
+            <option value="rsi">RSI超买超卖</option>
+          </select>
+          <input id="btSecid" placeholder="secid，如 1.600519 / pt02GN2211" style="width:220px">
+          <input id="btName" placeholder="名称（可留空）" style="width:140px">
+          <input id="btCash" placeholder="初始资金（默认10万）" style="width:160px" type="number">
+          <button class="btn" id="btnBacktest">运行回测</button>
+        </div>
+        <div class="muted-note">回测基于历史日K，满仓进出，忽略滑点；结果仅供策略有效性参考。</div>
+      </div>
+    </div>
+    <div class="bt-stats" id="btStats" style="display:none"></div>
+    <div class="panel" id="btChartPanel" style="display:none">
+      <h2>权益曲线</h2>
+      <canvas id="btChart" style="width:100%;height:280px"></canvas>
+    </div>
+    <div class="panel" id="btTradesPanel" style="display:none">
+      <h2>交易明细</h2>
+      <table>
+        <thead><tr><th>日期</th><th>方向</th><th>价格</th><th>数量</th><th>金额</th></tr></thead>
+        <tbody id="btTradesBody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<footer>数据来源：新浪财经 / 东方财富 / 腾讯财经（免费公开接口）· 模拟交易仅供学习研究，不构成投资建议</footer>
+
+<script src="/common.js"></script>
+<script>
+"use strict";
+const SIG_STRATEGY = { ma_cross: "均线金叉", breakout: "突破策略", rsi: "RSI超买超卖" };
+
+/* ---------- 账户 ---------- */
+async function loadAccount() {
+  try {
+    const a = await getJSON("/api/trade/account");
+    const cards = [
+      ["总资产", fmtMoney(a.total_asset)],
+      ["可用现金", fmtMoney(a.cash)],
+      ["持仓市值", fmtMoney(a.market_value)],
+      ["累计盈亏", (a.total_profit >= 0 ? "+" : "") + fmtMoney(a.total_profit) + " (" + (a.total_profit_pct >= 0 ? "+" : "") + a.total_profit_pct.toFixed(2) + "%)"],
+    ];
+    const cls = a.total_profit >= 0 ? "up" : "down";
+    $("acctCards").innerHTML = cards.map(([k, v], i) =>
+      `<div class="card"><div class="k">${k}</div><div class="v ${i === 3 ? cls : ""}">${v}</div></div>`).join("");
+  } catch (e) {
+    $("acctCards").innerHTML = `<div class="card"><div class="k">加载失败</div><div class="v">${e.message}</div></div>`;
+  }
+}
+
+function fmtMoney(v) {
+  if (v == null) return "—";
+  return "¥" + Number(v).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/* ---------- 挂单 ---------- */
+async function loadPending() {
+  try {
+    const orders = await getJSON("/api/trade/orders?status=pending");
+    $("pendingBody").innerHTML = orders.map(o => `<tr>
+      <td>${o.id}</td>
+      <td>${o.name} <span style="color:var(--muted);font-size:11px">${o.code}</span></td>
+      <td class="${o.side === "buy" ? "up" : "down"}">${o.side === "buy" ? "买入" : "卖出"}</td>
+      <td class="num">${fmt(o.price)}</td>
+      <td class="num">${o.quantity}</td>
+      <td style="color:var(--muted)">${new Date(o.created_at).toLocaleString("zh-CN", { hour12: false })}</td>
+      <td><button class="btn small" onclick="cancelOrder(${o.id})">撤销</button></td>
+    </tr>`).join("") || `<tr><td colspan="7" class="empty">无挂单</td></tr>`;
+  } catch (e) {
+    $("pendingBody").innerHTML = `<tr><td colspan="7" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+async function cancelOrder(id) {
+  try {
+    await fetch(`/api/trade/orders?id=${id}`, { method: "DELETE" });
+    toast("已撤销订单 #" + id);
+    loadPending();
+    loadOrders();
+    loadAccount();
+  } catch (e) {
+    toast("撤销失败：" + e.message);
+  }
+}
+
+/* ---------- 持仓 ---------- */
+async function loadPositions() {
+  try {
+    const pos = await getJSON("/api/trade/positions");
+    $("posBody").innerHTML = pos.map(p => `<tr>
+      <td>${p.code}</td>
+      <td>${p.name}</td>
+      <td class="num">${p.quantity}</td>
+      <td class="num">${fmt(p.avg_cost)}</td>
+      <td class="num">${fmt(p.last_price)}</td>
+      <td class="num">${fmtMoney(p.market_value)}</td>
+      <td class="${p.profit >= 0 ? "up" : "down"}">${p.profit >= 0 ? "+" : ""}${fmtMoney(p.profit)}</td>
+      <td class="${p.profit_pct >= 0 ? "up" : "down"}">${p.profit_pct >= 0 ? "+" : ""}${p.profit_pct.toFixed(2)}%</td>
+    </tr>`).join("") || `<tr><td colspan="8" class="empty">暂无持仓</td></tr>`;
+  } catch (e) {
+    $("posBody").innerHTML = `<tr><td colspan="8" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+/* ---------- 订单/成交 ---------- */
+async function loadOrders() {
+  try {
+    const orders = await getJSON("/api/trade/orders?limit=100");
+    $("ordersBody").innerHTML = orders.map(o => `<tr>
+      <td>${o.id}</td>
+      <td>${o.name} <span style="color:var(--muted);font-size:11px">${o.code}</span></td>
+      <td class="${o.side === "buy" ? "up" : "down"}">${o.side === "buy" ? "买入" : "卖出"}</td>
+      <td>${o.order_type === "market" ? "市价" : "限价"}</td>
+      <td class="num">${fmt(o.price)}</td>
+      <td class="num">${o.quantity}</td>
+      <td class="num">${o.filled_qty > 0 ? fmt(o.filled_price) : "—"}</td>
+      <td>${orderStatus(o.status)}</td>
+      <td style="color:var(--muted)">${new Date(o.created_at).toLocaleString("zh-CN", { hour12: false })}</td>
+    </tr>`).join("") || `<tr><td colspan="9" class="empty">暂无订单</td></tr>`;
+  } catch (e) {
+    $("ordersBody").innerHTML = `<tr><td colspan="9" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+async function loadTrades() {
+  try {
+    const trades = await getJSON("/api/trade/trades?limit=100");
+    $("tradesBody").innerHTML = trades.map(t => `<tr>
+      <td>${t.name} <span style="color:var(--muted);font-size:11px">${t.code}</span></td>
+      <td class="${t.side === "buy" ? "up" : "down"}">${t.side === "buy" ? "买入" : "卖出"}</td>
+      <td class="num">${fmt(t.price)}</td>
+      <td class="num">${t.quantity}</td>
+      <td class="num">${fmtMoney(t.amount)}</td>
+      <td class="num">${fmt(t.fee)}</td>
+      <td style="color:var(--muted)">${new Date(t.traded_at).toLocaleString("zh-CN", { hour12: false })}</td>
+    </tr>`).join("") || `<tr><td colspan="7" class="empty">暂无成交</td></tr>`;
+  } catch (e) {
+    $("tradesBody").innerHTML = `<tr><td colspan="7" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+function orderStatus(s) {
+  const map = { pending: "挂单中", filled: "已成交", partially: "部分成交", canceled: "已撤销", rejected: "已拒绝" };
+  return map[s] || s;
+}
+
+/* ---------- 策略信号 ---------- */
+let sigStrategy = "ma_cross";
+async function loadSignals() {
+  $("sigBody").innerHTML = `<tr><td colspan="5" class="loading">生成信号中 …</td></tr>`;
+  try {
+    const [quotes, boards] = await Promise.all([getJSON("/api/quotes"), getJSON("/api/board-quotes")]);
+    const targets = [];
+    quotes.forEach(q => targets.push({ secid: q.secid, name: q.name, type: "指数" }));
+    boards.forEach(b => targets.push({ secid: b.secid, name: b.name, type: "板块" }));
+    const rows = [];
+    for (const t of targets) {
+      try {
+        const sig = await getJSON(`/api/trade/signal?strategy=${sigStrategy}&secid=${encodeURIComponent(t.secid)}&name=${encodeURIComponent(t.name)}`);
+        rows.push(`<tr>
+          <td>${t.name}</td>
+          <td style="color:var(--muted)">${t.type}</td>
+          <td><span class="sig-badge sig-${sig.action}">${sigAction(sig.action)}</span></td>
+          <td class="num">${fmt(sig.price)}</td>
+          <td style="color:var(--muted)">${sig.reason || ""}</td>
+        </tr>`);
+      } catch (e) {
+        rows.push(`<tr><td>${t.name}</td><td style="color:var(--muted)">${t.type}</td><td colspan="3" class="empty">信号失败</td></tr>`);
+      }
+    }
+    $("sigBody").innerHTML = rows.join("") || `<tr><td colspan="5" class="empty">无监控标的</td></tr>`;
+  } catch (e) {
+    $("sigBody").innerHTML = `<tr><td colspan="5" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+function sigAction(a) {
+  return a === "buy" ? "买入" : (a === "sell" ? "卖出" : "持有");
+}
+
+/* ---------- 回测 ---------- */
+async function runBacktest() {
+  const secid = $("btSecid").value.trim();
+  if (!secid) { toast("请输入 secid"); return; }
+  const body = {
+    strategy: $("btStrategy").value,
+    secid: secid,
+    name: $("btName").value.trim(),
+    initial_cash: parseFloat($("btCash").value) || 100000,
+  };
+  $("btnBacktest").textContent = "回测中 …";
+  $("btnBacktest").disabled = true;
+  try {
+    const r = await fetch("/api/trade/backtest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(x => x.json());
+    if (r.error || !r.final_asset) throw new Error(r.error || "回测失败");
+    renderBacktest(r);
+  } catch (e) {
+    toast("回测失败：" + e.message);
+  } finally {
+    $("btnBacktest").textContent = "运行回测";
+    $("btnBacktest").disabled = false;
+  }
+}
+
+function renderBacktest(r) {
+  $("btStats").style.display = "grid";
+  $("btStats").innerHTML = [
+    ["总收益率", pctStr(r.total_return), r.total_return >= 0 ? "up" : "down"],
+    ["年化收益", pctStr(r.annual_return), r.annual_return >= 0 ? "up" : "down"],
+    ["最大回撤", (r.max_drawdown).toFixed(2) + "%", "down"],
+    ["胜率", r.win_rate.toFixed(1) + "%", ""],
+    ["夏普比率", r.sharpe.toFixed(2), ""],
+    ["交易次数", r.trade_count, ""],
+    ["期末资产", fmtMoney(r.final_asset), ""],
+  ].map(([k, v, c]) => `<div class="item"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join("");
+
+  // 权益曲线
+  $("btChartPanel").style.display = "";
+  const data = r.equity_curve.map(p => ({ date: p.date, close: p.asset }));
+  drawTimeSeries($("btChart"), data, { labelDigits: 0, emptyText: "无权益数据" });
+
+  // 交易明细
+  $("btTradesPanel").style.display = "";
+  $("btTradesBody").innerHTML = r.trades.map(t => `<tr>
+    <td style="color:var(--muted)">${t.traded_at ? new Date(t.traded_at).toLocaleDateString("zh-CN") : ""}</td>
+    <td class="${t.side === "buy" ? "up" : "down"}">${t.side === "buy" ? "买入" : "卖出"}</td>
+    <td class="num">${fmt(t.price)}</td>
+    <td class="num">${t.quantity}</td>
+    <td class="num">${fmtMoney(t.amount)}</td>
+  </tr>`).join("") || `<tr><td colspan="5" class="empty">无交易</td></tr>`;
+}
+
+/* ---------- 下单 ---------- */
+async function placeOrder() {
+  const code = $("oCode").value.trim();
+  const secid = $("oSecid").value.trim();
+  if (!code && !secid) { toast("请输入代码或 secid"); return; }
+  const qty = parseInt($("oQty").value, 10);
+  if (!qty || qty <= 0) { toast("请输入有效数量"); return; }
+  // secid 自动补全：A股 6 位代码按 60/68/51 开头归沪市(1.)，否则深市(0.)
+  let s = secid;
+  if (!s && code) {
+    if (/^\d{6}$/.test(code)) {
+      s = /^(60|68|51|9)/.test(code) ? "1." + code : "0." + code;
+    } else if (/^[A-Za-z]/.test(code)) {
+      s = "105." + code.toUpperCase(); // 美股默认纳斯达克
+    }
+  }
+  const body = {
+    secid: s, code: code, name: $("oName").value.trim(),
+    side: $("oSide").value, order_type: $("oType").value,
+    price: parseFloat($("oPrice").value) || 0,
+    quantity: qty,
+  };
+  try {
+    const r = await fetch("/api/trade/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(x => x.json());
+    if (r.error) {
+      toast(r.error);
+    } else {
+      toast(r.status === "filled" ? "已成交" : (r.status === "pending" ? "已挂单" : r.status));
+      loadAccount(); loadPending(); loadPositions(); loadOrders(); loadTrades();
+    }
+  } catch (e) {
+    toast("下单失败：" + e.message);
+  }
+}
+
+/* ---------- Tab 切换 ---------- */
+function switchTab(name) {
+  ["tabTrade", "tabPos", "tabOrders", "tabSignal", "tabBacktest"].forEach(id => $(id).classList.toggle("on", id === "tab" + name));
+  ["secTrade", "secPos", "secOrders", "secSignal", "secBacktest"].forEach(id => $(id).style.display = id === "sec" + name ? "" : "none");
+  if (name === "Pos") loadPositions();
+  if (name === "Orders") { loadOrders(); loadTrades(); }
+  if (name === "Signal") loadSignals();
+}
+$("tabTrade").onclick = () => switchTab("Trade");
+$("tabPos").onclick = () => switchTab("Pos");
+$("tabOrders").onclick = () => switchTab("Orders");
+$("tabSignal").onclick = () => switchTab("Signal");
+$("tabBacktest").onclick = () => switchTab("Backtest");
+
+/* ---------- 信号策略切换 ---------- */
+document.querySelectorAll("#sigStrategy .chip").forEach(c => {
+  c.onclick = () => {
+    document.querySelectorAll("#sigStrategy .chip").forEach(x => x.classList.remove("on"));
+    c.classList.add("on");
+    sigStrategy = c.dataset.s;
+    loadSignals();
+  };
+});
+
+$("btnPlace").onclick = placeOrder;
+$("btnBacktest").onclick = runBacktest;
+
+/* ---------- 初始化 ---------- */
+renderNav(NAV, "/trading.html");
+startClock();
+loadAccount();
+loadPending();
+setInterval(loadAccount, 30000);
+setInterval(loadPending, 30000);
+</script>
+</body>
+</html>

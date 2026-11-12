@@ -4,141 +4,30 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KILLER · 大盘监控</title>
-<style>
-  :root {
-    --bg: #0f1419;
-    --panel: #1a2129;
-    --panel2: #212a34;
-    --border: #2c3743;
-    --text: #e6edf3;
-    --muted: #8b98a5;
-    --up: #f0453e;      /* A股：红涨 */
-    --down: #22ab71;    /* A股：绿跌 */
-    --flat: #8b98a5;
-    --accent: #3b82f6;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-    min-height: 100vh;
-  }
-  header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--border);
-    background: var(--panel);
-  }
-  header h1 { font-size: 20px; font-weight: 600; }
-  header h1 .en { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 8px; }
-  .status { display: flex; gap: 16px; font-size: 13px; color: var(--muted); align-items: center; }
-  .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--down); display: inline-block; margin-right: 6px; }
-  .status .dot.ok { background: var(--down); }
-  .status .dot.err { background: var(--up); }
-  .status .dot.off { background: var(--flat); }
-
-  main { padding: 20px 24px; max-width: 1280px; margin: 0 auto; }
-
-  /* 指数卡片 */
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-    cursor: pointer;
-    transition: border-color .15s;
-  }
-  .card:hover, .card.active { border-color: var(--accent); }
-  .card .name { font-size: 14px; color: var(--muted); display: flex; justify-content: space-between; }
-  .card .name .code { font-size: 12px; }
-  .card .price { font-size: 28px; font-weight: 700; margin: 8px 0 4px; font-variant-numeric: tabular-nums; }
-  .card .delta { font-size: 14px; font-variant-numeric: tabular-nums; }
-  .card .sub { margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
-  .up { color: var(--up); }
-  .down { color: var(--down); }
-  .flat { color: var(--flat); }
-
-  /* 图表区 */
-  .chartbox {
-    margin-top: 20px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-  }
-  .chartbox .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-  .chartbox .head h2 { font-size: 15px; font-weight: 600; }
-  .tabs button {
-    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
-    padding: 5px 14px; font-size: 13px; cursor: pointer;
-  }
-  .tabs button:first-child { border-radius: 6px 0 0 6px; }
-  .tabs button:last-child { border-radius: 0 6px 6px 0; }
-  .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-  canvas { width: 100%; height: 300px; display: block; }
-
-  /* 告警表 */
-  .alerts { margin-top: 20px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-  .alerts h2 { font-size: 15px; margin-bottom: 12px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 500; }
-  td.num { font-variant-numeric: tabular-nums; }
-  .empty { color: var(--muted); text-align: center; padding: 24px; }
-  .badge { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
-  .badge.change_up { background: rgba(240,69,62,.15); color: var(--up); }
-  .badge.change_down { background: rgba(34,171,113,.15); color: var(--down); }
-  .badge.amplitude { background: rgba(59,130,246,.15); color: var(--accent); }
-
-  /* 板块成分股抽屉 */
-  #boardDetail {
-    position: fixed; right: 0; top: 0; bottom: 0; width: min(640px, 94vw);
-    background: var(--panel); border-left: 1px solid var(--border); z-index: 20;
-    transform: translateX(100%); transition: transform .2s; overflow-y: auto; padding: 20px;
-  }
-  #boardDetail.open { transform: translateX(0); }
-  #boardDetail .close { float: right; cursor: pointer; color: var(--muted); font-size: 20px; line-height: 1; }
-  #boardDetail h2 { font-size: 18px; margin-bottom: 4px; }
-  #boardDetail .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
-  #boardDetail th { background: var(--panel2); }
-  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 20px; }
-</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/market.css">
 </head>
 <body>
 <header>
   <h1>KILLER<span class="en">Market Monitor · Go Edition</span></h1>
-  <div class="status">
+  <nav></nav>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <!-- 状态条：交易时段 / 数据源 / 错误 -->
+  <div class="status" style="margin-bottom:16px">
     <span id="tradeState"><span class="dot off"></span>—</span>
     <span id="srcState">数据源: —</span>
     <span id="errState"></span>
-    <span id="clock">—</span>
   </div>
-</header>
 
-<nav style="display:flex;gap:4px;padding:10px 24px 0;max-width:1280px;margin:0 auto">
-  <a href="/" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#fff;background:#3b82f6">大盘监控</a>
-  <a href="/boards.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">A股板块</a>
-  <a href="/stocks.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">A股个股</a>
-  <a href="/us.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">美股</a>
-  <a href="/ndx.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">纳指100</a>
-  <a href="/datasource.html" style="padding:6px 14px;border-radius:6px;font-size:14px;color:#8b98a5">数据源</a>
-</nav>
-
-<main>
   <section class="cards" id="cards"></section>
 
-  <section id="boardSec" style="display:none">
-    <h2 style="font-size:15px;font-weight:600;margin:20px 0 12px">板块监控
-      <span style="color:var(--muted);font-weight:400;font-size:12px">（config.yaml boards 配置 · 点击卡片看走势）</span>
-    </h2>
-    <div class="cards" id="boardCards"></div>
-  </section>
-</section>
-
-  <section class="chartbox">
-    <div class="head">
+  <section class="panel" style="margin-top:20px">
+    <div class="chartbox-head">
       <h2 id="chartTitle">走势图</h2>
       <div class="tabs">
         <button id="tabIntraday" class="on" onclick="switchTab('intraday')">当日分时</button>
@@ -148,8 +37,8 @@
     <canvas id="chart"></canvas>
   </section>
 
-  <section class="alerts">
-    <h2>告警记录 <span style="color:var(--muted);font-weight:400;font-size:12px">（涨跌幅 / 振幅阈值，含冷却）</span></h2>
+  <section class="panel" style="margin-top:20px">
+    <h2>告警记录 <span class="hint">（涨跌幅 / 振幅阈值，含冷却）</span></h2>
     <table>
       <thead><tr><th>时间</th><th>名称</th><th>类型</th><th>触发值</th><th>阈值</th><th>点位</th></tr></thead>
       <tbody id="alertBody"></tbody>
@@ -158,45 +47,46 @@
   </section>
 </main>
 
-<!-- 板块成分股抽屉（选股范围 + 权重） -->
-<div id="boardDetail">
-  <span class="close" onclick="closeBoardDetail()">✕</span>
-  <h2 id="bdName">—</h2>
-  <div class="sub" id="bdSub">—</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width:36px">#</th>
-        <th>代码</th><th>名称</th><th>现价</th>
-        <th>涨跌幅</th><th>成交额</th><th>流通市值</th><th>权重</th>
-      </tr>
-    </thead>
-    <tbody id="bdBody"><tr><td colspan="8" class="empty">加载中 …</td></tr></tbody>
-  </table>
-  <div id="bdNote" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
-</div>
-
 <footer>数据来源：东方财富 / 新浪财经（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
 
+<script src="/common.js"></script>
 <script>
 "use strict";
-const STATE = { secid: null, tab: "intraday", quotes: [], boardQuotes: [] };
+const STATE = { secid: null, tab: "intraday", quotes: [] };
 
-const $ = id => document.getElementById(id);
-const cls = v => v > 0 ? "up" : (v < 0 ? "down" : "flat");
-const pctStr = v => (v > 0 ? "+" : "") + v.toFixed(2) + "%";
-const fmt = (v, d=2) => v == null ? "—" : Number(v).toFixed(d);
+/* ---------- 卡片排序（拖拽 + 持久化） ---------- */
+const ORDER_KEY = "killer.cardOrder";   // localStorage 键：secid 顺序数组
+let cardOrder = loadCardOrder();        // 用户自定义卡片顺序（secid 数组，空=用后端顺序）
 
-async function getJSON(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(url + " → HTTP " + r.status);
-  return r.json();
+function loadCardOrder() {
+  try {
+    const v = JSON.parse(localStorage.getItem(ORDER_KEY));
+    return Array.isArray(v) ? v.filter(x => typeof x === "string") : [];
+  } catch { return []; }
+}
+function saveCardOrder() {
+  try { localStorage.setItem(ORDER_KEY, JSON.stringify(cardOrder)); } catch {}
 }
 
-/* ---------- 指数/板块卡片 ---------- */
-function cardHTML(x) {
+// 按用户自定义顺序重排卡片；不在 order 里的（新增标的）追加到末尾
+function orderedQuotes() {
+  if (!cardOrder.length) return STATE.quotes;
+  const bySec = new Map(STATE.quotes.map(q => [q.secid, q]));
+  const ordered = [];
+  for (const sid of cardOrder) {
+    const q = bySec.get(sid);
+    if (q) { ordered.push(q); bySec.delete(sid); }
+  }
+  for (const q of STATE.quotes) if (bySec.has(q.secid)) ordered.push(q);
+  return ordered;
+}
+
+/* ---------- 指数/全球卡片 ---------- */
+function cardHTML(x, i) {
   return `
-    <div class="card ${x.secid === STATE.secid ? "active" : ""}" onclick="onCardClick('${x.secid}', '${x.name}')">
+    <div class="card ${x.secid === STATE.secid ? "active" : ""}"
+         draggable="true" data-secid="${x.secid}" data-idx="${i}"
+         onclick="onCardClick('${x.secid}', '${x.name}')">
       <div class="name"><span>${x.name}</span><span class="code">${x.code}</span></div>
       <div class="price ${cls(x.pct)}">${fmt(x.price)}</div>
       <div class="delta ${cls(x.pct)}">${x.change >= 0 ? "+" : ""}${fmt(x.change)}　${pctStr(x.pct)}</div>
@@ -204,28 +94,22 @@ function cardHTML(x) {
     </div>`;
 }
 
-// 点击卡片：指数切换走势图；板块额外弹出成分股抽屉
+// 点击卡片：切换走势图（全球标的无历史走势，仅显示实时行情）
 function onCardClick(secid, name) {
   selectCard(secid);
-  if (secid.startsWith("90.")) openBoardDetail(secid, name);
 }
 
 function findQuote(secid) {
-  return STATE.quotes.find(x => x.secid === secid) || STATE.boardQuotes.find(x => x.secid === secid);
+  return STATE.quotes.find(x => x.secid === secid);
 }
 
 function renderCards() {
-  const all = [...STATE.quotes, ...STATE.boardQuotes];
-  if (all.length && (!STATE.secid || !all.some(x => x.secid === STATE.secid))) {
-    // 当前选中的标的已不在监控列表（配置变更）→ 回落到第一个指数
-    STATE.secid = STATE.quotes[0] ? STATE.quotes[0].secid : all[0].secid;
+  const ordered = orderedQuotes();
+  if (ordered.length && (!STATE.secid || !ordered.some(x => x.secid === STATE.secid))) {
+    // 当前选中的标的已不在监控列表（配置变更）→ 回落到第一个
+    STATE.secid = ordered[0].secid;
   }
-  $("cards").innerHTML = STATE.quotes.map(cardHTML).join("");
-  const configured = STATE.boardsConfigured > 0;
-  $("boardSec").style.display = (STATE.boardQuotes.length || configured) ? "" : "none";
-  $("boardCards").innerHTML = STATE.boardQuotes.length
-    ? STATE.boardQuotes.map(cardHTML).join("")
-    : (configured ? `<div class="empty" style="grid-column:1/-1">行情暂不可用 — 数据源限流中，恢复后自动显示</div>` : "");
+  $("cards").innerHTML = ordered.map(cardHTML).join("");
 }
 
 function selectCard(secid) {
@@ -233,8 +117,58 @@ function selectCard(secid) {
   STATE.secid = secid;
   renderCards();
   drawChart(); // 数据未到位前显示"加载中"
+  // 全球标的（znb_/hf_/hk）无历史走势，跳过拉取
+  if (isGlobalSecid(secid)) return;
   loadCurrentTab().catch(e => {
-    $("errState").innerHTML = `<span style="color:var(--up)">⚠ ${e.message}</span>`;
+    $("errState").innerHTML = `<span class="err">⚠ ${e.message}</span>`;
+  });
+}
+
+/* ---------- 拖拽排序 ---------- */
+let dragSecid = null;   // 正在拖拽的卡片 secid
+
+function bindDrag() {
+  const cardsEl = $("cards");
+  cardsEl.addEventListener("dragstart", e => {
+    const card = e.target.closest(".card");
+    if (!card) return;
+    dragSecid = card.dataset.secid;
+    card.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", dragSecid); } catch {}
+  });
+  cardsEl.addEventListener("dragend", e => {
+    const card = e.target.closest(".card");
+    if (card) card.classList.remove("dragging");
+    cardsEl.querySelectorAll(".drag-over").forEach(c => c.classList.remove("drag-over"));
+    dragSecid = null;
+  });
+  cardsEl.addEventListener("dragover", e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const card = e.target.closest(".card");
+    if (!card) return;
+    cardsEl.querySelectorAll(".drag-over").forEach(c => { if (c !== card) c.classList.remove("drag-over"); });
+    card.classList.add("drag-over");
+  });
+  cardsEl.addEventListener("dragleave", e => {
+    const card = e.target.closest(".card");
+    if (card && !card.contains(e.relatedTarget)) card.classList.remove("drag-over");
+  });
+  cardsEl.addEventListener("drop", e => {
+    e.preventDefault();
+    const target = e.target.closest(".card");
+    if (!target || !dragSecid || target.dataset.secid === dragSecid) return;
+    const ordered = orderedQuotes().map(q => q.secid);
+    const from = ordered.indexOf(dragSecid);
+    const to = ordered.indexOf(target.dataset.secid);
+    if (from < 0 || to < 0) return;
+    // 移除拖拽项并插入到目标位置
+    ordered.splice(from, 1);
+    ordered.splice(to, 0, dragSecid);
+    cardOrder = ordered;
+    saveCardOrder();
+    renderCards();
   });
 }
 
@@ -271,134 +205,41 @@ function switchTab(tab) {
   drawChart();
 }
 
-function setupCanvas() {
-  const c = $("chart"), dpr = window.devicePixelRatio || 1;
-  const w = c.clientWidth, h = 300;
-  c.width = w * dpr; c.height = h * dpr;
-  c.style.height = h + "px";
-  const ctx = c.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { ctx, w, h };
-}
-
 function drawChart() {
-  const { ctx, w, h } = setupCanvas();
-  ctx.clearRect(0, 0, w, h);
-  const title = STATE.tab === "intraday" ? "当日分时走势" : "日 K 收盘走势（120日）";
+  const c = $("chart");
   const cur = findQuote(STATE.secid);
-  $("chartTitle").textContent = (cur ? cur.name + " · " : "") + title;
+  $("chartTitle").textContent = (cur ? cur.name + " · " : "") +
+    (STATE.tab === "intraday" ? "当日分时走势" : "日 K 收盘走势（120日）");
+
+  // 全球标的无历史走势数据
+  if (isGlobalSecid(STATE.secid)) {
+    const { ctx, w, h } = setupCanvas(c, 300);
+    drawHint(ctx, w, h, "该标的暂无历史走势数据（仅提供实时行情）");
+    return;
+  }
 
   if (STATE.tab === "intraday") {
     // 数据属于其他指数（切换中）→ 显示加载中，避免闪旧图
     if (intradayFor !== STATE.secid) {
-      drawLoading(ctx, w, h);
+      const { ctx, w, h } = setupCanvas(c, 300);
+      drawHint(ctx, w, h, "加载中 …");
       return;
     }
-    drawLine(ctx, w, h, intradayData.map(d => ({ x: d.date, y: d.close })), cur);
+    drawTimeSeries(c, intradayData, {
+      height: 300, base: cur && cur.prev_close, showBaseLine: true,
+      emptyText: "暂无分时数据（数据源可能未返回当日分钟线）",
+    });
   } else {
     if (klineFor !== STATE.secid) {
-      drawLoading(ctx, w, h);
+      const { ctx, w, h } = setupCanvas(c, 300);
+      drawHint(ctx, w, h, "加载中 …");
       return;
     }
-    drawLine(ctx, w, h, klineData.map(d => ({ x: d.date, y: d.close })), null);
+    drawTimeSeries(c, klineData, { height: 300, emptyText: "暂无K线数据" });
   }
 }
 
-function drawLoading(ctx, w, h) {
-  ctx.fillStyle = "#8b98a5"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
-  ctx.fillText("加载中 …", w / 2, h / 2);
-}
-
-function drawLine(ctx, w, h, pts, cur) {
-  const pad = { l: 10, r: 64, t: 14, b: 24 };
-  if (pts.length < 2) {
-    ctx.fillStyle = "#8b98a5"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
-    ctx.fillText(STATE.tab === "intraday" ? "暂无分时数据（数据源可能未返回当日分钟线）" : "暂无K线数据", w/2, h/2);
-    return;
-  }
-  const ys = pts.map(p => p.y);
-  let min = Math.min(...ys), max = Math.max(...ys);
-  if (cur && STATE.tab === "intraday" && cur.prev_close) {
-    // 分时图以昨收为中轴（A股惯例）
-    min = Math.min(min, cur.prev_close); max = Math.max(max, cur.prev_close);
-  }
-  const span = (max - min) || 1;
-  const X = i => pad.l + (w - pad.l - pad.r) * i / (pts.length - 1);
-  const Y = v => pad.t + (h - pad.t - pad.b) * (1 - (v - min) / span);
-
-  // 网格 + 右侧刻度
-  ctx.strokeStyle = "#2c3743"; ctx.fillStyle = "#8b98a5"; ctx.font = "11px sans-serif";
-  ctx.textAlign = "left";
-  for (let g = 0; g <= 4; g++) {
-    const v = min + span * g / 4, y = Y(v);
-    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
-    ctx.fillText(v.toFixed(1), w - pad.r + 6, y + 4);
-  }
-  // 昨收中轴（分时）
-  if (cur && STATE.tab === "intraday" && cur.prev_close) {
-    ctx.setLineDash([4,4]); ctx.strokeStyle = "#8b98a5";
-    ctx.beginPath(); ctx.moveTo(pad.l, Y(cur.prev_close)); ctx.lineTo(w - pad.r, Y(cur.prev_close)); ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // 折线
-  const last = pts[pts.length - 1].y;
-  const first = pts[0].y;
-  const base = (cur && STATE.tab === "intraday" && cur.prev_close) ? cur.prev_close : first;
-  ctx.strokeStyle = last > base ? "#f0453e" : (last < base ? "#22ab71" : "#8b98a5");
-  ctx.lineWidth = 1.6;
-  ctx.beginPath();
-  pts.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.y)) : ctx.moveTo(X(i), Y(p.y)));
-  ctx.stroke();
-
-  // X 轴首尾标签
-  ctx.fillStyle = "#8b98a5"; ctx.textAlign = "left";
-  ctx.fillText(String(pts[0].x).slice(5, 16).replace("T", " "), pad.l, h - 6);
-  ctx.textAlign = "right";
-  ctx.fillText(String(pts[pts.length-1].x).slice(5, 16).replace("T", " "), w - pad.r, h - 6);
-}
-
-/* ---------- 板块成分股抽屉（选股范围 + 权重） ---------- */
-const fmtCap = v => !v ? "—" : v >= 1e12 ? (v / 1e12).toFixed(2) + "万亿" : (v / 1e8).toFixed(0) + "亿";
-const fmtAmt = v => !v ? "—" : v >= 1e8 ? (v / 1e8).toFixed(1) + "亿" : (v / 1e4).toFixed(0) + "万";
-
-async function openBoardDetail(secid, name) {
-  const el = $("boardDetail");
-  el.classList.add("open");
-  $("bdName").textContent = name || secid;
-  $("bdSub").textContent = "成分股加载中 …";
-  $("bdNote").textContent = "";
-  $("bdBody").innerHTML = `<tr><td colspan="8" class="empty">加载中 …</td></tr>`;
-  try {
-    const list = await getJSON(`/api/board-members?secid=${encodeURIComponent(secid)}`);
-    renderBoardMembers(list);
-  } catch (e) {
-    $("bdSub").textContent = "—";
-    $("bdBody").innerHTML = `<tr><td colspan="8" class="empty">加载失败：${e.message}</td></tr>`;
-  }
-}
-
-function renderBoardMembers(list) {
-  const total = list.reduce((s, x) => s + (x.float_cap || 0), 0);
-  const rows = [...list].sort((a, b) => (b.float_cap || 0) - (a.float_cap || 0));
-  $("bdSub").textContent = `选股范围：共 ${list.length} 只 · 合计流通市值 ${fmtCap(total)} · 按权重降序（60 秒缓存）`;
-  $("bdBody").innerHTML = rows.map((s, i) => {
-    const w = total > 0 && s.float_cap > 0 ? (s.float_cap / total * 100).toFixed(2) + "%" : "—";
-    return `<tr>
-      <td style="color:var(--muted)">${i + 1}</td>
-      <td>${s.code}</td>
-      <td>${s.name}</td>
-      <td class="num">${fmt(s.price)}</td>
-      <td class="${cls(s.pct)}">${pctStr(s.pct)}</td>
-      <td class="num">${fmtAmt(s.amount)}</td>
-      <td class="num">${fmtCap(s.float_cap)}</td>
-      <td class="num"><b>${w}</b></td>
-    </tr>`;
-  }).join("") || `<tr><td colspan="8" class="empty">暂无成分股</td></tr>`;
-  $("bdNote").textContent = "权重 = 个股流通市值 ÷ 成分股合计流通市值（近似口径；东财未发布板块指数真实权重）";
-}
-
-function closeBoardDetail() { $("boardDetail").classList.remove("open"); }
+/* ---------- 板块成分股抽屉已移除（首页不再展示板块监控） ---------- */
 
 /* ---------- 告警 ---------- */
 const TYPE_LABEL = { change_up: "涨幅超限", change_down: "跌幅超限", amplitude: "振幅超限" };
@@ -421,41 +262,48 @@ function renderStatus(s) {
   $("tradeState").innerHTML = `<span class="dot ${trading ? "ok" : "off"}"></span>${trading ? "交易时段" : "休市"}`;
   $("srcState").textContent = `数据源: ${s.primary}` + (s.fallback ? ` → ${s.fallback}` : "");
   $("errState").innerHTML = s.last_error
-    ? `<span style="color:var(--up)">⚠ ${s.last_error}</span>` : "";
+    ? `<span class="err">⚠ ${s.last_error}</span>` : "";
 }
 
 /* ---------- 轮询 ---------- */
 async function refresh() {
   try {
-    const [quotes, boards, alerts, status] = await Promise.all([
-      getJSON("/api/quotes"), getJSON("/api/board-quotes"),
-      getJSON("/api/alerts?n=50"), getJSON("/api/status"),
+    const [quotes, alerts, status] = await Promise.all([
+      getJSON("/api/quotes"), getJSON("/api/alerts?n=50"), getJSON("/api/status"),
     ]);
     STATE.quotes = quotes;
-    STATE.boardQuotes = boards;
-    STATE.boardsConfigured = status.boards || 0;
     renderCards();
     // 刷新当前 tab 数据（loadXxx 内部有 seq 竞态保护，过期响应会被丢弃）
-    if (STATE.tab === "intraday") { await loadIntraday(); drawChart(); }
+    if (STATE.tab === "intraday" && !isGlobalSecid(STATE.secid)) { await loadIntraday(); drawChart(); }
     renderAlerts(alerts);
     renderStatus(status);
   } catch (e) {
-    $("errState").innerHTML = `<span style="color:var(--up)">⚠ ${e.message}</span>`;
+    $("errState").innerHTML = `<span class="err">⚠ ${e.message}</span>`;
   }
   $("clock").textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
 }
 
+// 判断是否全球标的（无历史走势）
+// znb_/hf_ 前缀（新浪全球指数/商品）+ hk 前缀大写（腾讯港股指数 hkHSI/hkHSTECH）
+function isGlobalSecid(secid) {
+  if (!secid) return false;
+  if (secid.startsWith("znb_") || secid.startsWith("hf_")) return true;
+  return /^hk[A-Z]/.test(secid);
+}
+
 async function init() {
   await refresh();
+  bindDrag();
   setInterval(refresh, 10000);
   setInterval(async () => {   // K线低频刷新即可
-    if (STATE.tab === "kline") { try { await loadKline(); drawChart(); } catch {} }
+    if (STATE.tab === "kline" && !isGlobalSecid(STATE.secid)) { try { await loadKline(); drawChart(); } catch {} }
   }, 60000);
   window.addEventListener("resize", drawChart);
   // tab 切换：数据不属于当前指数才需要拉（加载中由 drawChart 兜底显示）
   const origSwitch = switchTab;
   window.switchTab = async t => {
     origSwitch(t);
+    if (isGlobalSecid(STATE.secid)) return;
     try {
       if (t === "kline" && klineFor !== STATE.secid) await loadKline();
       if (t === "intraday" && intradayFor !== STATE.secid) await loadIntraday();
@@ -463,6 +311,9 @@ async function init() {
     } catch (e) { console.error(e); }
   };
 }
+
+renderNav(NAV, "/");
+startClock();
 init();
 </script>
 </body>

@@ -26,8 +26,9 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
-// hqRe 匹配 hq.sinajs.cn 任意 symbol 行（sh600519 / gb_aapl 通吃）。
-var hqRe = regexp.MustCompile(`hq_str_([a-z0-9_.]+)="([^"]*)"`)
+// hqRe 匹配 hq.sinajs.cn 任意 symbol 行（sh600519 / gb_aapl / znb_NKY / hf_GC 通吃）。
+// symbol 可含大写字母（全球指数 znb_NKY、商品 hf_GC 等），故字符类含 A-Z。
+var hqRe = regexp.MustCompile(`hq_str_([a-zA-Z0-9_.]+)="([^"]*)"`)
 
 const (
 	sinaStockListURL  = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=%d&num=%d&sort=%s&asc=%d&node=hs_a&symbol="

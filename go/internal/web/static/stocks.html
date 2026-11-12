@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>KILLER · A股个股</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/market.css">
 </head>
 <body>
@@ -16,7 +19,7 @@
 <main>
   <!-- 自选区 -->
   <div class="panel">
-    <h2>自选监控 <span style="color:var(--muted);font-weight:400;font-size:12px">（涨跌幅超阈值自动告警，随大盘巡检 60s 一轮）</span></h2>
+    <h2>自选监控 <span class="hint">（涨跌幅超阈值自动告警，随大盘巡检 60s 一轮）</span></h2>
     <table>
       <thead>
         <tr>
@@ -38,7 +41,7 @@
       <option value="f20">按总市值</option>
       <option value="f12">按代码</option>
     </select>
-    <span style="color:var(--muted);font-size:12px">点击行查看日K/分时详情 · 点★加/移出自选 · 30 秒刷新</span>
+    <span class="hint">点击行查看日K/分时详情 · 点★加/移出自选 · 30 秒刷新</span>
   </div>
 
   <div class="panel">
@@ -208,56 +211,17 @@ async function loadDetailChart() {
     const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=120" : ""}`);
     drawDetail(data);
   } catch (e) {
-    const c = $("dChart"), ctx = setup(c);
-    ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("图表加载失败（" + e.message + "）", ctx.canvas.clientWidth / 2, 130);
+    const { ctx, w, h } = setupCanvas($("dChart"), 260);
+    drawHint(ctx, w, h, "图表加载失败（" + e.message + "）");
   }
-}
-
-function setup(c) {
-  const dpr = window.devicePixelRatio || 1;
-  const w = c.clientWidth || 500, h = 260;
-  c.width = w * dpr; c.height = h * dpr;
-  const ctx = c.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return ctx;
 }
 
 function drawDetail(data) {
-  const c = $("dChart");
-  const ctx = setup(c);
-  const w = c.clientWidth, h = 260;
-  ctx.clearRect(0, 0, w, h);
-  const pts = data.map(d => ({ x: d.date, y: d.close }));
-  if (pts.length < 2) {
-    ctx.fillStyle = "#8b98a5"; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("暂无数据", w / 2, h / 2);
-    return;
-  }
-  const pad = { l: 8, r: 58, t: 12, b: 22 };
-  const ys = pts.map(p => p.y);
-  let min = Math.min(...ys), max = Math.max(...ys);
-  const span = (max - min) || 1;
-  const X = i => pad.l + (w - pad.l - pad.r) * i / (pts.length - 1);
-  const Y = v => pad.t + (h - pad.t - pad.b) * (1 - (v - min) / span);
-
-  ctx.strokeStyle = "#2c3743"; ctx.fillStyle = "#8b98a5"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
-  for (let g = 0; g <= 4; g++) {
-    const v = min + span * g / 4, y = Y(v);
-    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
-    ctx.fillText(v.toFixed(2), w - pad.r + 5, y + 4);
-  }
-  const last = pts[pts.length - 1].y, first = pts[0].y;
-  ctx.strokeStyle = last >= first ? "#f0453e" : "#22ab71";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  pts.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.y)) : ctx.moveTo(X(i), Y(p.y)));
-  ctx.stroke();
-
-  ctx.fillStyle = "#8b98a5"; ctx.textAlign = "left";
-  ctx.fillText(String(pts[0].x).slice(0, 10), pad.l, h - 6);
-  ctx.textAlign = "right";
-  ctx.fillText(String(pts[pts.length - 1].x).slice(0, 16).replace("T", " "), w - pad.r, h - 6);
+  drawTimeSeries($("dChart"), data, {
+    height: 260,
+    emptyText: "暂无数据",
+    labelDigits: 2,
+  });
 }
 
 $("dKline").onclick = () => {
