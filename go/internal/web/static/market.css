@@ -387,6 +387,14 @@ footer {
   font-weight: 620;
 }
 
+/* 一级 tab：同页并列内容区之间的切换，比次级芯片大一档以拉开层级 */
+.tabs.lv1 button {
+  height: 34px;
+  padding: 0 18px;
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+
 .toolbar select, .toolbar input {
   background: var(--bg-input);
   color: var(--text-primary);

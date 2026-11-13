@@ -20,81 +20,92 @@
   <!-- 三大指数卡片（合并后原样保留） -->
   <div class="cards" id="indices"><div class="card loading">加载中 …</div></div>
 
-  <!-- 板块走势（合并后原样保留） -->
+  <!-- 板块走势 / 美股个股：一级 tab 并列切换 -->
   <div class="toolbar">
-    <strong style="font-size:15px">板块走势（SPDR 行业 ETF）</strong>
-    <div class="tabs">
-      <button id="secDesc" class="on">领涨优先</button>
-      <button id="secAsc">领跌优先</button>
+    <div class="tabs lv1">
+      <button id="tabSector" class="on">板块走势</button>
+      <button id="tabStock">美股个股</button>
     </div>
-    <span class="hint">60 秒刷新</span>
-  </div>
-  <div class="panel">
-    <table>
-      <thead><tr><th>代码</th><th>行业</th><th>现价</th><th>涨跌幅</th><th style="width:220px">相对涨跌</th></tr></thead>
-      <tbody id="sectorBody"><tr><td colspan="5" class="loading">加载中 …</td></tr></tbody>
-    </table>
+    <span class="hint">三大指数卡片常驻 · 板块与个股切换查看</span>
   </div>
 
-  <!-- 美股个股：成交活跃榜 + 纳指100 成分合并为一个区，tab 切换 -->
-  <div class="toolbar">
-    <strong style="font-size:15px">美股个股</strong>
-    <div class="tabs">
-      <button id="tabActive" class="on">成交活跃榜</button>
-      <button id="tabNDX">纳指100 成分</button>
-    </div>
-    <span class="hint">点击行查看日K/分时详情 · 30 秒刷新</span>
-  </div>
-
-  <!-- Tab 1：成交活跃榜 -->
-  <div id="paneActive">
+  <!-- 一级 Tab A：板块走势 -->
+  <div id="paneSector">
     <div class="toolbar">
       <div class="tabs">
-        <button id="mAll" class="on">全部</button>
-        <button id="mNas">纳斯达克</button>
-        <button id="mNyse">纽交所</button>
+        <button id="secDesc" class="on">领涨优先</button>
+        <button id="secAsc">领跌优先</button>
       </div>
-      <select id="usSort">
-        <option value="f6">按成交额</option>
-        <option value="f3">按涨幅</option>
-        <option value="f20">按总市值</option>
-      </select>
+      <span class="hint">SPDR 11 行业 ETF · 60 秒刷新</span>
     </div>
     <div class="panel">
       <table>
-        <thead><tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌幅</th><th>成交额</th><th>总市值</th></tr></thead>
-        <tbody id="usBody"><tr><td colspan="6" class="loading">加载中 …</td></tr></tbody>
+        <thead><tr><th>代码</th><th>行业</th><th>现价</th><th>涨跌幅</th><th style="width:220px">相对涨跌</th></tr></thead>
+        <tbody id="sectorBody"><tr><td colspan="5" class="loading">加载中 …</td></tr></tbody>
       </table>
-      <div class="pager">
-        <button id="prev">上一页</button>
-        <span id="pageInfo">—</span>
-        <button id="next">下一页</button>
-      </div>
     </div>
   </div>
 
-  <!-- Tab 2：纳指100 成分（原 /ndx.html 内容并入） -->
-  <div id="paneNDX" style="display:none">
-    <div class="stats" id="stats">加载中 …</div>
+  <!-- 一级 Tab B：美股个股（二级 tab 切换活跃榜 / 纳指100 成分） -->
+  <div id="paneStock" style="display:none">
     <div class="toolbar">
-      <input id="q" placeholder="筛选代码/名称（如 AAPL / 苹果）" style="width:260px">
-      <select id="ndxSort">
-        <option value="pct_desc">按涨幅</option>
-        <option value="pct_asc">按跌幅</option>
-        <option value="cap_desc">按总市值</option>
-        <option value="code">按代码</option>
-      </select>
+      <div class="tabs">
+        <button id="tabActive" class="on">成交活跃榜</button>
+        <button id="tabNDX">纳指100 成分</button>
+      </div>
+      <span class="hint">点击行查看日K/分时详情 · 30 秒刷新</span>
     </div>
-    <div class="panel">
-      <table>
-        <thead>
-          <tr>
-            <th style="width:36px">#</th><th>代码</th><th>名称</th><th>现价</th>
-            <th>涨跌幅</th><th>今开</th><th>最高</th><th>最低</th><th>总市值</th>
-          </tr>
-        </thead>
-        <tbody id="ndxBody"><tr><td colspan="9" class="loading">加载中 …</td></tr></tbody>
-      </table>
+
+    <!-- 二级 Tab 1：成交活跃榜 -->
+    <div id="paneActive">
+      <div class="toolbar">
+        <div class="tabs">
+          <button id="mAll" class="on">全部</button>
+          <button id="mNas">纳斯达克</button>
+          <button id="mNyse">纽交所</button>
+        </div>
+        <select id="usSort">
+          <option value="f6">按成交额</option>
+          <option value="f3">按涨幅</option>
+          <option value="f20">按总市值</option>
+        </select>
+      </div>
+      <div class="panel">
+        <table>
+          <thead><tr><th>代码</th><th>名称</th><th>现价</th><th>涨跌幅</th><th>成交额</th><th>总市值</th></tr></thead>
+          <tbody id="usBody"><tr><td colspan="6" class="loading">加载中 …</td></tr></tbody>
+        </table>
+        <div class="pager">
+          <button id="prev">上一页</button>
+          <span id="pageInfo">—</span>
+          <button id="next">下一页</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 二级 Tab 2：纳指100 成分（原 /ndx.html 内容并入） -->
+    <div id="paneNDX" style="display:none">
+      <div class="stats" id="stats">加载中 …</div>
+      <div class="toolbar">
+        <input id="q" placeholder="筛选代码/名称（如 AAPL / 苹果）" style="width:260px">
+        <select id="ndxSort">
+          <option value="pct_desc">按涨幅</option>
+          <option value="pct_asc">按跌幅</option>
+          <option value="cap_desc">按总市值</option>
+          <option value="code">按代码</option>
+        </select>
+      </div>
+      <div class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:36px">#</th><th>代码</th><th>名称</th><th>现价</th>
+              <th>涨跌幅</th><th>今开</th><th>最高</th><th>最低</th><th>总市值</th>
+            </tr>
+          </thead>
+          <tbody id="ndxBody"><tr><td colspan="9" class="loading">加载中 …</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </main>
@@ -120,6 +131,8 @@
 const STATE = {
   // 指数 / 板块
   secSort: "desc", sectors: [],
+  // 一级 tab：sector=板块走势，stock=美股个股
+  pane: "sector",
   // 个股区
   activeTab: "active", usStocks: [], page: 1, sort: "f6", market: "", total: 0,
   ndxStocks: [], ndxSort: "pct_desc", q: "",
@@ -166,13 +179,37 @@ function renderSectors(sectors) {
   }).join("") || `<tr><td colspan="5" class="empty">暂无数据</td></tr>`;
 }
 
-// ---- 个股区 tab ----
+// ---- 一级 tab：板块走势 / 美股个股 ----
+let stockTimer = null;
+function refreshStock() { STATE.activeTab === "ndx" ? loadNDX() : loadUS(); }
+function ensureStock() {
+  // 个股区只在可见时拉取与轮询：东财限流期不为看不见的表格消耗请求
+  const loaded = STATE.activeTab === "ndx" ? STATE.ndxStocks.length : STATE.usStocks.length;
+  if (!loaded) refreshStock();
+  clearInterval(stockTimer);
+  stockTimer = setInterval(refreshStock, 30000);
+}
+function setPane(p) {
+  STATE.pane = p;
+  $("tabSector").classList.toggle("on", p === "sector");
+  $("tabStock").classList.toggle("on", p === "stock");
+  $("paneSector").style.display = p === "sector" ? "" : "none";
+  $("paneStock").style.display = p === "stock" ? "" : "none";
+  clearInterval(stockTimer);
+  stockTimer = null;
+  if (p === "stock") ensureStock();
+}
+$("tabSector").onclick = () => setPane("sector");
+$("tabStock").onclick = () => setPane("stock");
+
+// ---- 个股区二级 tab ----
 function setTab(t) {
   STATE.activeTab = t;
   $("tabActive").classList.toggle("on", t === "active");
   $("tabNDX").classList.toggle("on", t === "ndx");
   $("paneActive").style.display = t === "active" ? "" : "none";
   $("paneNDX").style.display = t === "ndx" ? "" : "none";
+  if (STATE.pane === "stock") ensureStock();
 }
 $("tabActive").onclick = () => setTab("active");
 $("tabNDX").onclick = () => setTab("ndx");
@@ -328,14 +365,13 @@ $("ndxSort").addEventListener("change", e => { STATE.ndxSort = e.target.value; r
 
 renderNav(NAV, "/us.html");
 startClock();
-// 支持 /us.html?tab=ndx 直接打开纳指100 成分 tab（便于直达/分享）
-if (new URLSearchParams(location.search).get("tab") === "ndx") setTab("ndx");
-loadIndices();
-loadUS();
-loadNDX();
+// 支持 ?tab=sector|active|ndx 直达对应 tab（旧 ?tab=ndx 链接继续可用）
+const tabParam = new URLSearchParams(location.search).get("tab");
+if (tabParam === "ndx") { setTab("ndx"); setPane("stock"); }
+else if (tabParam === "active") setPane("stock");
+loadIndices();          // 指数卡片 + 板块表（同一请求）
 setInterval(loadIndices, 60000);
-setInterval(loadUS, 30000);
-setInterval(loadNDX, 30000);
+// 个股区的数据由 setPane/ensureStock 按需拉取，不在板块 tab 时空跑
 </script>
 </body>
 </html>
