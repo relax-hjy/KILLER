@@ -17,7 +17,8 @@ import (
 // 撮合规则（简化）：
 //   - 市价单：用当前实时行情价立即成交。
 //   - 限价单：挂单，等行情满足价格条件时成交（由 MatchPending 驱动）。
-//   - 买入冻结现金，卖出冻结持仓（简化：卖出不冻结，成交时校验）。
+//   - 买入挂单即冻结委托资金（金额+手续费上限），成交按实际成本多退少补，撤单解冻；
+//     卖出不冻结持仓（简化，成交时校验可用数量）。
 type Engine struct {
 	cfg   *config.Config
 	store *Store
@@ -81,14 +82,11 @@ func (e *Engine) PlaceOrder(ctx context.Context, req model.Order) (int64, string
 
 	// 限价单：挂单，返回 pending
 	if req.OrderType == model.OrderTypeLimit {
-		// 挂单前校验可用资金/持仓（但不冻结成交）
+		// 挂单前校验资金/持仓
 		if req.Side == model.SideBuy {
-			acc, _ := e.store.GetAccount(e.cfg.Trading.InitialCash)
-			need := req.Price * float64(req.Quantity)
-			_, _, feeTotal := e.fee(model.SideBuy, need)
-			if acc.Cash < need+feeTotal {
-				e.store.UpdateOrder(id, 0, 0, model.OrderStatusRejected, 0, "可用资金不足")
-				return id, "rejected", fmt.Errorf("可用资金不足：需 %.2f，可用 %.2f", need+feeTotal, acc.Cash)
+			if err := e.reserveBuy(&req); err != nil {
+				e.store.UpdateOrder(id, 0, 0, model.OrderStatusRejected, 0, err.Error())
+				return id, "rejected", err
 			}
 		} else {
 			p, _ := e.store.GetPosition(req.SecID)
@@ -100,8 +98,50 @@ func (e *Engine) PlaceOrder(ctx context.Context, req model.Order) (int64, string
 		return id, "pending", nil
 	}
 
-	// 市价单：立即撮合
+	// 市价单：买入先冻结再撮合（fillOrder 按实际成本多退少补）
+	if req.Side == model.SideBuy {
+		if err := e.reserveBuy(&req); err != nil {
+			e.store.UpdateOrder(id, 0, 0, model.OrderStatusRejected, 0, err.Error())
+			return id, "rejected", err
+		}
+	}
 	return e.fillOrder(ctx, id, req.Price)
+}
+
+// reserveBuy 冻结买入委托资金：按委托价计金额+手续费上限，从可用现金移入冻结。
+// 不冻结的话挂单会重复占用同一笔现金，账户概览与交易指导都会超买。
+func (e *Engine) reserveBuy(req *model.Order) error {
+	amount := req.Price * float64(req.Quantity)
+	_, _, fee := e.fee(model.SideBuy, amount)
+	need := amount + fee
+	acc, _ := e.store.GetAccount(e.cfg.Trading.InitialCash)
+	if acc.Cash < need {
+		return fmt.Errorf("可用资金不足：需 %.2f，可用 %.2f", need, acc.Cash)
+	}
+	_, err := e.store.updateCash(-need, need)
+	return err
+}
+
+// releaseBuy 释放买入委托冻结额（撤单/成交拒绝时用）。
+func (e *Engine) releaseBuy(o *model.Order) {
+	acc, err := e.store.GetAccount(e.cfg.Trading.InitialCash)
+	if err != nil {
+		return
+	}
+	frozen := e.reserved(o)
+	if frozen > acc.FrozenCash {
+		frozen = acc.FrozenCash // 兼容升级前的旧挂单（无冻结额）
+	}
+	if frozen > 0 {
+		_, _ = e.store.updateCash(frozen, -frozen)
+	}
+}
+
+// reserved 买入委托的冻结额（委托价计）。
+func (e *Engine) reserved(o *model.Order) float64 {
+	amount := o.Price * float64(o.Quantity)
+	_, _, fee := e.fee(model.SideBuy, amount)
+	return amount + fee
 }
 
 // fillOrder 撮合一笔订单（立即成交）。需持有 e.mu。
@@ -116,17 +156,22 @@ func (e *Engine) fillOrder(ctx context.Context, orderID int64, fillPrice float64
 
 	qty := o.Quantity
 	amount := fillPrice * float64(qty)
-	commission, stampTax, feeTotal := e.fee(o.Side, amount)
+	_, _, feeTotal := e.fee(o.Side, amount)
 
 	if o.Side == model.SideBuy {
-		acc, _ := e.store.GetAccount(e.cfg.Trading.InitialCash)
 		totalCost := amount + feeTotal
-		if acc.Cash < totalCost {
+		acc, _ := e.store.GetAccount(e.cfg.Trading.InitialCash)
+		// 委托时已冻结：解冻并按实际成本多退少补（限价成交价更优时差额回现金）
+		frozen := e.reserved(o)
+		if frozen > acc.FrozenCash {
+			frozen = acc.FrozenCash // 兼容升级前的旧挂单（无冻结额）
+		}
+		if short := totalCost - frozen; short > 0 && acc.Cash < short {
 			e.store.UpdateOrder(orderID, 0, 0, model.OrderStatusRejected, 0, "可用资金不足")
+			e.releaseBuy(o)
 			return orderID, "rejected", fmt.Errorf("可用资金不足：需 %.2f，可用 %.2f", totalCost, acc.Cash)
 		}
-		// 扣现金
-		if _, err := e.store.updateCash(-totalCost, 0); err != nil {
+		if _, err := e.store.updateCash(frozen-totalCost, -frozen); err != nil {
 			return orderID, "", err
 		}
 		// 加持仓
@@ -162,8 +207,6 @@ func (e *Engine) fillOrder(ctx context.Context, orderID int64, fillPrice float64
 	if _, err := e.store.RecordTrade(t); err != nil {
 		return orderID, "", err
 	}
-	_ = commission
-	_ = stampTax
 	log.Printf("[Trading] %s %s %d股 @ %.2f 手续费 %.2f", o.Side, o.Name, qty, fillPrice, feeTotal)
 	return orderID, "filled", nil
 }
@@ -178,6 +221,10 @@ func (e *Engine) CancelOrder(orderID int64) error {
 	}
 	if o.Status != model.OrderStatusPending {
 		return fmt.Errorf("订单非挂单状态，无法撤销（当前 %s）", o.Status)
+	}
+	// 买入挂单解冻委托资金
+	if o.Side == model.SideBuy {
+		e.releaseBuy(o)
 	}
 	return e.store.UpdateOrder(orderID, 0, 0, model.OrderStatusCanceled, 0, "用户撤销")
 }
@@ -298,6 +345,16 @@ func (e *Engine) Positions(ctx context.Context) ([]model.Position, error) {
 		}
 	}
 	return positions, nil
+}
+
+// ImportPosition 期初持仓导入（账户外已有持仓登记），不涉及现金与订单。
+func (e *Engine) ImportPosition(secid, code, name string, qty int64, avgCost float64) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if qty <= 0 {
+		return fmt.Errorf("数量必须为正")
+	}
+	return e.store.ImportPosition(secid, code, name, qty, avgCost)
 }
 
 // Orders 最近订单。

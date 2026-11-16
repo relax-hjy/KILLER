@@ -1,8 +1,11 @@
 // Package store 封装 SQLite 存储（modernc 纯 Go 驱动，无 CGO 依赖）。
 //
-// 两张表：
-//   - quote_snap: 指数行情快照（时间序列，供走势与回看）
-//   - alert:      告警记录（含冷却判断依据）
+// 存储分组：
+//   - quote_snap:      指数行情快照（时间序列，供走势与回看）
+//   - alert:           告警记录（含冷却判断依据）
+//   - watch_stock:     自选个股
+//   - setting:         键值设置（数据源路由等）
+//   - analysis_report: 分析日报（每标的每交易日一份，兼作盘后持久缓存）
 package store
 
 import (
@@ -65,6 +68,18 @@ CREATE TABLE IF NOT EXISTS setting (
 	key   TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS analysis_report (
+	secid      TEXT NOT NULL,
+	date       TEXT NOT NULL,
+	name       TEXT    NOT NULL DEFAULT '',
+	score      REAL    NOT NULL DEFAULT 0,
+	advice     TEXT    NOT NULL DEFAULT '',
+	payload    TEXT    NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (secid, date)
+);
+CREATE INDEX IF NOT EXISTS idx_report_secid_date ON analysis_report(secid, date DESC);
 `
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -234,4 +249,95 @@ func (s *Store) SetSetting(key, value string) error {
 		key, value,
 	)
 	return err
+}
+
+// ==========================================
+// AnalysisReport 分析日报（每标的每交易日一份，兼作盘后持久缓存）
+// ==========================================
+
+// SaveAnalysisReport 落库一份分析日报（同一标的同一交易日覆盖重写，盘中反复刷新只留最新结论）。
+func (s *Store) SaveAnalysisReport(r model.AnalysisReport) error {
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = time.Now()
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO analysis_report(secid,date,name,score,advice,payload,created_at) VALUES(?,?,?,?,?,?,?)
+		 ON CONFLICT(secid,date) DO UPDATE SET
+		   name=excluded.name, score=excluded.score, advice=excluded.advice,
+		   payload=excluded.payload, created_at=excluded.created_at`,
+		r.SecID, r.Date, r.Name, r.Score, r.Advice, r.Payload, r.CreatedAt.Unix(),
+	)
+	return err
+}
+
+// GetAnalysisReport 读取某标的某交易日日报（无记录返回 nil, nil）。
+func (s *Store) GetAnalysisReport(secid, date string) (*model.AnalysisReport, error) {
+	var r model.AnalysisReport
+	var ts int64
+	err := s.db.QueryRow(
+		`SELECT secid,date,name,score,advice,payload,created_at
+		 FROM analysis_report WHERE secid=? AND date=?`,
+		secid, date,
+	).Scan(&r.SecID, &r.Date, &r.Name, &r.Score, &r.Advice, &r.Payload, &ts)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.CreatedAt = time.Unix(ts, 0)
+	return &r, nil
+}
+
+// ListAnalysisReportsByDate 某交易日全部日报（不含 payload）——给交易指导做候选排序，免得逐只现算。
+func (s *Store) ListAnalysisReportsByDate(date string) ([]model.AnalysisReport, error) {
+	rows, err := s.db.Query(
+		`SELECT secid,date,name,score,advice,created_at
+		 FROM analysis_report WHERE date=? ORDER BY score DESC`,
+		date,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []model.AnalysisReport
+	for rows.Next() {
+		var r model.AnalysisReport
+		var ts int64
+		if err := rows.Scan(&r.SecID, &r.Date, &r.Name, &r.Score, &r.Advice, &ts); err != nil {
+			return nil, err
+		}
+		r.CreatedAt = time.Unix(ts, 0)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListAnalysisReports 某标的最近 limit 份日报（按日期降序，不含 payload）。
+func (s *Store) ListAnalysisReports(secid string, limit int) ([]model.AnalysisReport, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 60
+	}
+	rows, err := s.db.Query(
+		`SELECT secid,date,name,score,advice,created_at
+		 FROM analysis_report WHERE secid=? ORDER BY date DESC LIMIT ?`,
+		secid, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []model.AnalysisReport
+	for rows.Next() {
+		var r model.AnalysisReport
+		var ts int64
+		if err := rows.Scan(&r.SecID, &r.Date, &r.Name, &r.Score, &r.Advice, &ts); err != nil {
+			return nil, err
+		}
+		r.CreatedAt = time.Unix(ts, 0)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

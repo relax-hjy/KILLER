@@ -65,9 +65,9 @@
           <button id="mNyse">纽交所</button>
         </div>
         <select id="usSort">
+          <option value="f20" selected>按总市值</option>
           <option value="f6">按成交额</option>
           <option value="f3">按涨幅</option>
-          <option value="f20">按总市值</option>
         </select>
       </div>
       <div class="panel">
@@ -134,7 +134,7 @@ const STATE = {
   // 一级 tab：sector=板块走势，stock=美股个股
   pane: "sector",
   // 个股区
-  activeTab: "active", usStocks: [], page: 1, sort: "f6", market: "", total: 0,
+  activeTab: "active", usStocks: [], page: 1, sort: "f20", market: "", total: 0,
   ndxStocks: [], ndxSort: "pct_desc", q: "",
   // 详情抽屉
   detail: null, detailTab: "kline",

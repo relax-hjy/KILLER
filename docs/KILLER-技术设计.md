@@ -70,6 +70,18 @@ cmd/killer/main.go ── 装配
 | key | TEXT PK | 设置键（如 `routing`） |
 | value | TEXT | JSON 值；`routing` 存功能→数据源映射，启动时恢复到内存 |
 
+### analysis_report（分析日报，2026-11-16 新增）
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| secid | TEXT | 标的代码（与 date 组成复合主键） |
+| date | TEXT | 报告所属交易日 = 最新日K 日期 `YYYY-MM-DD`（节假日自动落到节前一日） |
+| name | TEXT | 标的名称 |
+| score / advice | REAL / TEXT | 综合评分与操作建议（列表查询用，免解 payload） |
+| payload | TEXT | 完整 Assessment JSON（含 5 项 Finding） |
+| created_at | INTEGER | Unix 秒；收盘补档据此识别"盘中快照"并重算 |
+
+同一标的同一交易日反复分析为 upsert，故盘中每 90 秒刷新只保留最后一次结论；收盘后由补档轮询定稿。
+
 ### 内存结构（model 包）
 - `Quote`：指数实时行情（含振幅，供告警）
 - `Kline`：日 K / 分时分钟线（date/open/close/high/low/volume）
@@ -121,7 +133,13 @@ cmd/killer/main.go ── 装配
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | /api/analysis?secid=&name= | 单标的完整分析：5 项 Finding + 综合评分/操作建议/支撑/压力/止损（日K 90s 缓存，实时价尽力而为、缺失回退最新收盘） |
-| GET | /api/analysis/watchlist | config `analysis.watchlist` 全量分析（并发拉取，保持配置顺序；单项失败进 `failed` 数组不影响其余） |
+| GET | /api/analysis/watchlist?group= | config `analysis.groups` 指定分组（缺省第一组）全量分析（并发拉取，保持配置顺序；单项失败进 `failed` 数组不影响其余）；响应含 `group`/`groups` |
+| GET | /api/analysis/reports?secid=&n= | 某标的历史日报索引（日期/评分/建议，来自 `analysis_report` 表，不含研判详情） |
+| GET | /api/analysis/report?secid=&date= | 某标的某交易日完整日报（无存档 400/404） |
+
+> 分析日报存储分组（2026-11-16 新增）：`analysis_report(secid, date, name, score, advice, payload, created_at)`，主键 `(secid,date)`，`payload` 为完整 Assessment JSON。
+> 缓存三级：内存 90 秒 → 收盘后直读 `LastSessionDate` 当日存档（免数据源请求）→ 现算并 upsert。
+> 服务启动与每 30 分钟跑一次收盘补档：全部分组标的缺档或仅有盘中快照（`created_at` 早于当日 15:05）时重算入库。
 
 ### 数据源治理模块（2026-11-12 新增）
 | 方法 | 路径 | 说明 |

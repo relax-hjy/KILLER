@@ -56,8 +56,36 @@ func TestEvaluateBoardChangeThreshold(t *testing.T) {
 	}
 }
 
-// TestTradingHours 验证交易时段判断（北京时间口径）。
-func TestTradingHours(t *testing.T) {
+// TestLastSessionDate 验证最近已收盘交易日推算（北京时间口径）。
+func TestLastSessionDate(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*3600)
+	}
+	at := func(y int, mo time.Month, d, h, mi int) time.Time {
+		return time.Date(y, mo, d, h, mi, 0, 0, loc)
+	}
+	cases := []struct {
+		name string
+		t    time.Time
+		want string
+	}{
+		{"收盘后归当日", at(2026, 11, 16, 15, 30), "2026-11-16"}, // 周一
+		{"盘中仍归当日", at(2026, 11, 16, 10, 0), "2026-11-16"},  // 盘中已有当日日K
+		{"盘前归前一工作日", at(2026, 11, 17, 8, 0), "2026-11-16"}, // 周二 08:00
+		{"周一盘前归上周五", at(2026, 11, 16, 0, 30), "2026-11-13"},
+		{"周六归周五", at(2026, 11, 14, 20, 0), "2026-11-13"}, // 周六
+		{"周日凌晨归上周五", at(2026, 11, 15, 1, 0), "2026-11-13"},
+	}
+	for _, c := range cases {
+		if got := LastSessionDate(c.t); got != c.want {
+			t.Errorf("%s: LastSessionDate=%s want %s", c.name, got, c.want)
+		}
+	}
+}
+
+// TestMarketOpen 验证交易时段判断（北京时间口径）。
+func TestMarketOpen(t *testing.T) {
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		t.Skipf("时区加载失败: %v", err)
@@ -77,8 +105,8 @@ func TestTradingHours(t *testing.T) {
 		{"周日 14:00", time.Date(2026, 11, 15, 14, 0, 0, 0, loc), false},
 	}
 	for _, c := range cases {
-		if got := tradingHours(c.t); got != c.want {
-			t.Errorf("%s: tradingHours=%v want %v", c.name, got, c.want)
+		if got := MarketOpen(c.t); got != c.want {
+			t.Errorf("%s: MarketOpen=%v want %v", c.name, got, c.want)
 		}
 	}
 }
@@ -87,12 +115,12 @@ func TestTradingHours(t *testing.T) {
 func TestTradingHoursUTCInput(t *testing.T) {
 	// 北京 10:30 = UTC 02:30
 	utc := time.Date(2026, 11, 9, 2, 30, 0, 0, time.UTC)
-	if !tradingHours(utc) {
+	if !MarketOpen(utc) {
 		t.Error("UTC 02:30（北京 10:30）应为交易时段")
 	}
 	// 北京 12:00 = UTC 04:00（午休）
 	utcNoon := time.Date(2026, 11, 9, 4, 0, 0, 0, time.UTC)
-	if tradingHours(utcNoon) {
+	if MarketOpen(utcNoon) {
 		t.Error("UTC 04:00（北京 12:00 午休）不应为交易时段")
 	}
 }

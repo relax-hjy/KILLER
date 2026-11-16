@@ -93,6 +93,8 @@ func (s *Store) Close() error { return s.db.Close() }
 // ============ 账户 ============
 
 // GetAccount 读取账户（不存在则创建）。
+// 还没下过单/成交时按配置期初现金重建账户，且把期初导入的持仓成本算进期初资产——
+// 否则期初带进来的持仓会被当成收益，累计盈亏虚高。改 config.yaml 的 initial_cash 同样靠这里生效。
 func (s *Store) GetAccount(initialCash float64) (*model.Account, error) {
 	var cash, frozen, initial float64
 	var ts int64
@@ -117,10 +119,45 @@ func (s *Store) GetAccount(initialCash float64) (*model.Account, error) {
 	if err != nil {
 		return nil, err
 	}
+	if initialCash > 0 {
+		if idle, iErr := s.noCashFlow(); iErr == nil && idle {
+			target := initialCash
+			if cost, cErr := s.positionCost(); cErr == nil {
+				target += cost
+			}
+			if initial != target || cash != initialCash {
+				if _, uErr := s.db.Exec(`UPDATE account SET cash=?, frozen_cash=0, initial_cash=?, updated_at=? WHERE id=1`,
+					initialCash, target, time.Now().Unix()); uErr == nil {
+					cash, frozen, initial = initialCash, 0, target
+				}
+			}
+		}
+	}
 	return &model.Account{
 		InitialCash: initial, Cash: cash, FrozenCash: frozen,
 		UpdatedAt: time.Unix(ts, 0),
 	}, nil
+}
+
+// noCashFlow 账户还没下过单/成交（持仓可能是期初导入的，不算现金活动）。
+func (s *Store) noCashFlow() (bool, error) {
+	for _, q := range []string{`SELECT COUNT(*) FROM trade_order`, `SELECT COUNT(*) FROM trade`} {
+		var n int
+		if err := s.db.QueryRow(q).Scan(&n); err != nil {
+			return false, err
+		}
+		if n > 0 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// positionCost 持仓成本合计（数量×均价）。
+func (s *Store) positionCost() (float64, error) {
+	var cost float64
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(quantity*avg_cost),0) FROM position`).Scan(&cost)
+	return cost, err
 }
 
 // updateCash 更新账户现金（delta 可正可负）。返回更新后账户。
@@ -200,6 +237,18 @@ func (s *Store) applyPosition(secid, code, name string, deltaQty int64, fillPric
 	}
 	_, err = s.db.Exec(`UPDATE position SET quantity=?, available=?, avg_cost=?, name=?, updated_at=? WHERE secid=?`,
 		newQty, newQty, newAvg, name, time.Now().Unix(), secid)
+	return err
+}
+
+// ImportPosition 期初持仓导入：直接写入持仓（数量与可用同为 qty），不动现金、不生成订单/成交。
+// 用于把账户外已有的真实持仓登记进来；重复导入同一只按覆盖处理。
+// 期初资产（initial_cash）由 GetAccount 在无下单记录时按"期初现金 + 持仓成本"重建，这里不用碰账户表。
+func (s *Store) ImportPosition(secid, code, name string, qty int64, avgCost float64) error {
+	_, err := s.db.Exec(
+		`INSERT INTO position(secid,code,name,quantity,available,avg_cost,updated_at) VALUES(?,?,?,?,?,?,?)
+		 ON CONFLICT(secid) DO UPDATE SET quantity=excluded.quantity, available=excluded.available,
+		   avg_cost=excluded.avg_cost, name=excluded.name, updated_at=excluded.updated_at`,
+		secid, code, name, qty, qty, avgCost, time.Now().Unix())
 	return err
 }
 

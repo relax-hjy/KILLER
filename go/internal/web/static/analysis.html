@@ -51,6 +51,15 @@
   .wl-score { font-weight: 620; font-variant-numeric: tabular-nums; }
   tbody tr.sel { background: var(--bg-selected); }
   tbody tr.sel td { color: var(--text-primary); }
+
+  /* 日报存档 */
+  .arch-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 16px; }
+  .arch-chip { display: inline-flex; align-items: baseline; gap: 7px; padding: 5px 11px; border: 1px solid var(--border-subtle); background: var(--bg-subtle); border-radius: 999px; cursor: pointer; font-family: var(--font-mono); font-size: var(--font-meta); color: var(--text-secondary); }
+  .arch-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
+  .arch-chip.on { background: var(--bg-selected); border-color: var(--border-strong); color: var(--text-primary); }
+  .arch-chip .sc { font-family: var(--font-display); font-weight: 640; font-variant-numeric: tabular-nums; }
+  .arch-note { font-size: var(--font-meta); color: var(--text-tertiary); }
+  .asm-arch { width: 100%; font-size: var(--font-meta); color: var(--warning); background: rgba(214,168,95,.11); border: 1px solid rgba(214,168,95,.24); border-radius: var(--radius-sm); padding: 6px 10px; }
 </style></head>
 <body>
 <header>
@@ -62,7 +71,8 @@
 <main>
   <!-- 观察列表 -->
   <section>
-    <h2 class="sec-title">A股科技股观察列表 <span class="hint">五个分析系统加权研判 · 列表来自 config.yaml analysis.watchlist</span></h2>
+    <h2 class="sec-title">分析观察列表 <span class="hint">五个分析系统加权研判 · 分组来自 config.yaml analysis.groups</span></h2>
+    <div class="tabs lv1" id="grpTabs" style="margin-bottom:12px"></div>
     <div class="toolbar">
       <span class="note" id="wlMeta">加载中 …</span>
       <button class="btn" id="btnRefresh">刷新</button>
@@ -85,6 +95,35 @@
       <div class="empty" style="padding:28px">等待选择标的</div>
     </div>
   </section>
+
+  <!-- 分析日报存档（存储分组：每标的每交易日一份） -->
+  <section style="margin-top:20px">
+    <h2 class="sec-title">分析日报存档 <span class="hint">每只标的每个交易日各存一份 · 点击日期回看当日结论</span></h2>
+    <div class="panel">
+      <div class="arch-wrap" id="archBar"><span class="arch-note">等待选择标的</span></div>
+    </div>
+  </section>
+  <!-- 评分回测（滚动重算：验证这套评分到底有没有预测力） -->
+  <section style="margin-top:20px">
+    <h2 class="sec-title">评分回测 <span class="hint">组内标的逐日滚动重算评分（只用截至当日的数据），看各评分档的未来收益</span></h2>
+    <div class="panel">
+      <div class="arch-wrap">
+        <button class="btn" id="btnRoll">对当前分组跑回测</button>
+        <span class="arch-note" id="rollMeta">300 根日K · 评估日只用历史数据，不存在未来函数 · 结果缓存 30 分钟</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>评分档</th><th>操作建议</th><th>评估数</th>
+            <th>5日胜率</th><th>5日均收益</th><th>5日超额</th>
+            <th>10日胜率</th><th>10日均收益</th><th>10日超额</th>
+            <th>20日胜率</th><th>20日均收益</th><th>20日超额</th>
+          </tr>
+        </thead>
+        <tbody id="rollBody"><tr><td colspan="12" class="empty">点上方按钮运行（首次约 5-15 秒）</td></tr></tbody>
+      </table>
+    </div>
+  </section>
 </main>
 
 <footer>数据来源：新浪财经 / 东方财富 / 腾讯财经（免费公开接口）· 分析结论由技术指标模型自动生成，仅供学习研究，不构成投资建议</footer>
@@ -92,8 +131,11 @@
 <script src="/common.js"></script>
 <script>
 "use strict";
-let wlItems = [];      // 完整分析结论（含 findings）
+let wlItems = [];      // 当前分组的完整分析结论（含 findings）
 let selIdx = -1;       // 当前选中
+let group = null;      // 当前分组名
+let archDays = [];     // 当前标的的历史日报存档索引
+let archDate = null;   // 当前回看的存档日期（null=实时结论）
 
 function advClass(advice) {
   if (advice.includes("买入") && !advice.includes("暂缓")) return "adv-buy";
@@ -111,11 +153,16 @@ async function loadWatchlist() {
   $("btnRefresh").disabled = true;
   $("wlMeta").textContent = "分析生成中（首次约 2-5 秒）…";
   try {
-    const r = await getJSON("/api/analysis/watchlist");
+    const r = await getJSON(`/api/analysis/watchlist?group=${encodeURIComponent(group || "")}`);
+    group = r.group;
     wlItems = r.items || [];
+    renderTabs(r.groups || []);
     renderWatchlist(r);
     if (selIdx < 0 && wlItems.length > 0) selectItem(0);
-    else if (selIdx >= 0 && selIdx < wlItems.length) renderDetail();
+    else if (selIdx >= 0 && selIdx < wlItems.length) {
+      if (archDate === null) renderDetail(wlItems[selIdx]);
+      loadArchive(wlItems[selIdx].secid);
+    }
   } catch (e) {
     $("wlBody").innerHTML = `<tr><td colspan="9" class="empty">加载失败：${e.message}</td></tr>`;
     $("wlMeta").textContent = "加载失败";
@@ -124,10 +171,29 @@ async function loadWatchlist() {
   }
 }
 
+/* ---------- 分组 tab ---------- */
+function renderTabs(groups) {
+  const el = $("grpTabs");
+  if (groups.length < 2) { el.innerHTML = ""; return; }
+  el.innerHTML = groups.map(g =>
+    `<button class="${g === group ? "on" : ""}" data-g="${g}">${g}</button>`).join("");
+  el.querySelectorAll("button").forEach(b => { b.onclick = () => setGroup(b.dataset.g); });
+}
+
+function setGroup(g) {
+  if (g === group) return;
+  group = g;
+  selIdx = -1;
+  archDate = null;
+  renderDetail(null);
+  $("archBar").innerHTML = `<span class="arch-note">等待选择标的</span>`;
+  loadWatchlist();
+}
+
 function renderWatchlist(r) {
   const failed = r.failed || [];
   const t = new Date(r.generated_at).toLocaleTimeString("zh-CN", { hour12: false });
-  $("wlMeta").textContent = `共 ${wlItems.length} 只 · 生成于 ${t} · 结果 90 秒内缓存` +
+  $("wlMeta").textContent = `分组「${r.group}」共 ${wlItems.length} 只 · 生成于 ${t} · 盘中 90 秒内缓存，盘后直读当日存档日报` +
     (failed.length ? ` · ${failed.length} 只失败：${failed.map(f => f.name).join("、")}` : "");
   $("wlBody").innerHTML = wlItems.map((a, i) => `<tr data-i="${i}" class="${i === selIdx ? "sel" : ""}" style="cursor:pointer">
     <td>${a.name}</td>
@@ -139,7 +205,7 @@ function renderWatchlist(r) {
     <td class="num">${fmt(a.support)}</td>
     <td class="num">${fmt(a.resistance)}</td>
     <td class="num">${fmt(a.stop_loss)}</td>
-  </tr>`).join("") || `<tr><td colspan="9" class="empty">观察列表为空（检查 config.yaml analysis.watchlist）</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="9" class="empty">分组观察列表为空（检查 config.yaml analysis.groups）</td></tr>`;
   document.querySelectorAll("#wlBody tr[data-i]").forEach(tr => {
     tr.onclick = () => selectItem(parseInt(tr.dataset.i, 10));
   });
@@ -147,14 +213,15 @@ function renderWatchlist(r) {
 
 function selectItem(i) {
   selIdx = i;
+  archDate = null;
   document.querySelectorAll("#wlBody tr[data-i]").forEach(tr =>
     tr.classList.toggle("sel", parseInt(tr.dataset.i, 10) === i));
-  renderDetail();
+  renderDetail(wlItems[i]);
+  loadArchive(wlItems[i] && wlItems[i].secid);
 }
 
 /* ---------- 综合研判详情 ---------- */
-function renderDetail() {
-  const a = wlItems[selIdx];
+function renderDetail(a) {
   if (!a) { $("asmPanel").innerHTML = `<div class="empty" style="padding:28px">等待选择标的</div>`; return; }
   const sc = scoreColor(a.score);
   const kpis = [
@@ -165,8 +232,11 @@ function renderDetail() {
     ["涨跌幅", pctStr(a.pct)],
     ["日K样本", `${a.kline_count} 根 · ${a.kline_date}`],
   ];
+  const archTip = archDate
+    ? `<div class="asm-arch">存档日报 · ${archDate}（非实时结论，当日收盘后最后一次分析）</div>` : "";
   $("asmPanel").innerHTML = `
     <div class="asm-head">
+      ${archTip}
       <span class="asm-name">${a.name}<span class="code">${a.code}</span></span>
       <span class="asm-price ${cls(a.pct)}">${fmt(a.price)}</span>
       <span class="${cls(a.pct)}" style="font-variant-numeric:tabular-nums">${pctStr(a.pct)}</span>
@@ -176,6 +246,56 @@ function renderDetail() {
     </div>
     <div class="lvl-kpis">${kpis.map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}</div>
     <div class="fd-grid">${(a.findings || []).map(fdCard).join("")}</div>`;
+}
+
+/* ---------- 分析日报存档 ---------- */
+async function loadArchive(secid) {
+  const bar = $("archBar");
+  archDays = [];
+  if (!secid) { bar.innerHTML = `<span class="arch-note">等待选择标的</span>`; return; }
+  bar.innerHTML = `<span class="arch-note">存档加载中 …</span>`;
+  try {
+    archDays = await getJSON(`/api/analysis/reports?secid=${encodeURIComponent(secid)}&n=60`);
+    renderArchive();
+  } catch (e) {
+    bar.innerHTML = `<span class="arch-note">存档读取失败：${e.message}</span>`;
+  }
+}
+
+function renderArchive() {
+  const bar = $("archBar");
+  if (archDays.length === 0) {
+    bar.innerHTML = `<span class="arch-note">暂无存档（该标的首次分析完成后即入库，每个交易日一份）</span>`;
+    return;
+  }
+  const chip = (date, score, advice, on) =>
+    `<button class="arch-chip ${on ? "on" : ""}" data-date="${date}">${date}` +
+    (score == null ? "" : `<span class="sc" style="color:${scoreColor(score)}">${score.toFixed(1)}</span>`) +
+    (advice ? `<span>${advice}</span>` : "") + `</button>`;
+  bar.innerHTML = chip("实时", null, null, archDate === null) +
+    archDays.map(d => chip(d.date, d.score, d.advice, d.date === archDate)).join("");
+  bar.querySelectorAll(".arch-chip").forEach(b => {
+    b.onclick = () => openArchive(b.dataset.date);
+  });
+}
+
+async function openArchive(date) {
+  if (date === "实时") {
+    archDate = null;
+    renderDetail(wlItems[selIdx]);
+    renderArchive();
+    return;
+  }
+  const a = wlItems[selIdx];
+  if (!a) return;
+  try {
+    const stored = await getJSON(`/api/analysis/report?secid=${encodeURIComponent(a.secid)}&date=${date}`);
+    archDate = date;
+    renderDetail(stored);
+    renderArchive();
+  } catch (e) {
+    toast("存档读取失败：" + e.message);
+  }
 }
 
 function fdCard(f) {
@@ -196,9 +316,39 @@ function fdCard(f) {
   </div>`;
 }
 
+/* ---------- 评分回测 ---------- */
+const pct2 = v => (v > 0 ? "+" : "") + v.toFixed(2) + "%";
+async function loadBacktest() {
+  const btn = $("btnRoll");
+  btn.disabled = true;
+  $("rollBody").innerHTML = `<tr><td colspan="12" class="loading">滚动重算中（组内每只 300 根日K，首次约 5-15 秒）…</td></tr>`;
+  $("rollMeta").textContent = "正在拉取日K并逐日重算评分 …";
+  try {
+    const r = await getJSON(`/api/analysis/backtest?group=${encodeURIComponent(group || "")}&bars=300`);
+    $("rollMeta").textContent = `分组「${r.group}」${r.securities} 只 · ${r.bars} 根日K · 评估 ${r.evaluations} 次 · ${r.note}`;
+    $("rollBody").innerHTML = (r.buckets || []).map(b => `
+      <tr>
+        <td>${b.bucket}</td>
+        <td>${b.advice}</td>
+        <td class="num">${b.count}</td>
+        ${[0, 1, 2].map(i => `
+        <td class="num">${b.n[i] ? b.win[i].toFixed(1) + "%" : "—"}</td>
+        <td class="num ${cls(b.avg[i])}">${b.n[i] ? pct2(b.avg[i]) : "—"}</td>
+        <td class="num ${cls(b.excess[i])}">${b.n[i] ? pct2(b.excess[i]) : "—"}</td>`).join("")}
+      </tr>`).join("") || `<tr><td colspan="12" class="empty">样本不足（该组标的历史日K不够 60 根预热）</td></tr>`;
+  } catch (e) {
+    $("rollMeta").textContent = "";
+    $("rollBody").innerHTML = `<tr><td colspan="12" class="empty">回测失败：${e.message}</td></tr>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+$("btnRoll").onclick = loadBacktest;
+
 $("btnRefresh").onclick = loadWatchlist;
 
 /* ---------- 初始化 ---------- */
+group = new URLSearchParams(location.search).get("group") || null;
 renderNav(NAV, "/analysis.html");
 startClock();
 loadWatchlist();

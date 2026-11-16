@@ -22,8 +22,10 @@ func (e *EastmoneySource) Name() string { return "eastmoney" }
 const (
 	emQuoteURL = "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=%s" +
 		"&fields=f2,f3,f4,f12,f13,f14,f15,f16,f17,f18,f5"
+	// fqt=1 前复权：fqt=0 的不复权K线在除权除息日会留假跳空（送转股直接腰斩价格），
+	// 趋势/动量/支撑压力全部被污染（2026-11-17 实测工行 601398 分红除权偏差 2.15%）
 	emKlineURL = "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=%s" +
-		"&klt=%d&fqt=0&lmt=%d&end=20500101" +
+		"&klt=%d&fqt=1&lmt=%d&end=20500101" +
 		"&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57"
 )
 

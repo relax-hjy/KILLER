@@ -68,7 +68,9 @@ type SourceMeta struct {
 var Features = []FeatureMeta{
 	{FeatQuotes, "大盘指数行情", []string{SrcEastmoney, SrcSina}},
 	{FeatIntraday, "当日分时（1分钟K）", []string{SrcEastmoney, SrcTencent}},
-	{FeatKline, "日K线", []string{SrcSina, SrcEastmoney, SrcTencent}},
+	// 日K线优先前复权源（腾讯 qfq / 东财 fqt=1），新浪无复权参数只能兜底——
+	// 不复权K线在除权日有假跳空，会污染技术指标（2026-11-17 实测）
+	{FeatKline, "日K线（前复权）", []string{SrcTencent, SrcEastmoney, SrcSina}},
 	{FeatBoards, "A股板块", []string{SrcTencent, SrcSina, SrcEastmoney}},
 	{FeatStocks, "A股个股列表", []string{SrcSina, SrcEastmoney}},
 	{FeatETFs, "A股 ETF 列表", []string{SrcEastmoney}},
@@ -166,6 +168,7 @@ func sourceSupports(feature, src string) bool {
 func Supports(feature, src string) bool { return sourceSupports(feature, src) }
 
 // pairFor 返回某功能的尝试顺序（首选 + 备选，单一来源功能只有一个）。
+// 对外用 PairFor。
 func pairFor(feature string) []string {
 	primary := GetRouting(feature)
 	for _, f := range Features {
@@ -188,6 +191,9 @@ func pairFor(feature string) []string {
 	}
 	return []string{SrcEastmoney}
 }
+
+// PairFor 某功能的尝试顺序（首选 + 备选），web 层按此顺序降级。
+func PairFor(feature string) []string { return pairFor(feature) }
 
 // ---- 连通性探测 ----
 

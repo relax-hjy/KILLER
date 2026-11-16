@@ -19,19 +19,38 @@ import (
 	"killer/internal/store"
 )
 
-// tradingHours 判断北京时间是否在交易时段（含集合竞价）。
+// MarketOpen 判断北京时间是否在交易时段（含集合竞价）。
 // 上午 9:15–11:35，下午 13:00–15:05（留收盘缓冲），周一至周五。
-func tradingHours(t time.Time) bool {
-	loc, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		loc = time.FixedZone("CST", 8*3600) // 兜底
-	}
-	bj := t.In(loc)
+func MarketOpen(t time.Time) bool {
+	bj := Beijing(t)
 	if bj.Weekday() == time.Saturday || bj.Weekday() == time.Sunday {
 		return false
 	}
 	mins := bj.Hour()*60 + bj.Minute()
 	return (mins >= 9*60+15 && mins <= 11*60+35) || (mins >= 13*60 && mins <= 15*60+5)
+}
+
+// LastSessionDate 最近一个已收盘交易日（YYYY-MM-DD，北京时间口径）。
+// 盘前（9:15 前）归前一交易日，周末与节假日回退到上一工作日。
+// 仅按工作日近似：节假日当天不会生成新日报，读取会命中节前最后一份，正是期望行为。
+func LastSessionDate(t time.Time) string {
+	bj := Beijing(t)
+	if bj.Hour()*60+bj.Minute() < 9*60+15 {
+		bj = bj.AddDate(0, 0, -1)
+	}
+	for bj.Weekday() == time.Saturday || bj.Weekday() == time.Sunday {
+		bj = bj.AddDate(0, 0, -1)
+	}
+	return bj.Format("2006-01-02")
+}
+
+// Beijing 转北京时间（Windows 可能缺 IANA 时区库，兜底固定 +8 偏移）。
+func Beijing(t time.Time) time.Time {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*3600) // 兜底
+	}
+	return t.In(loc)
 }
 
 // Watchdog 大盘监控看门狗。
@@ -252,7 +271,7 @@ func (w *Watchdog) CheckOnce(ctx context.Context) []model.Alert {
 	}
 
 	// 非交易时段且配置要求仅交易时段 → 只存快照不告警
-	if w.cfg.Monitoring.TradingHoursOnly && !tradingHours(time.Now()) {
+	if w.cfg.Monitoring.TradingHoursOnly && !MarketOpen(time.Now()) {
 		return nil
 	}
 
@@ -477,7 +496,7 @@ func (w *Watchdog) Status() map[string]any {
 		"fallback":      w.fallbackName(),
 		"last_error":    w.lastErr,
 		"interval_sec":  w.cfg.Monitoring.CheckIntervalSec,
-		"trading_hours": tradingHours(time.Now()),
+		"trading_hours": MarketOpen(time.Now()),
 		"monitored":     len(w.cfg.Indices),
 		"boards":        len(w.cfg.Boards),
 		"etfs":          len(w.cfg.ETFs),

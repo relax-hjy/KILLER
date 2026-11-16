@@ -81,6 +81,7 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	// 市场扩展
 	s.mux.HandleFunc("GET /api/boards", s.handleBoards)
 	s.mux.HandleFunc("GET /api/stocks", s.handleStocks)
+	s.mux.HandleFunc("GET /api/stocks/search", s.handleStockSearch)
 	s.mux.HandleFunc("GET /api/etfs", s.handleETFs)
 	s.mux.HandleFunc("GET /api/etf-quotes", s.handleETFQuotes)
 	s.mux.HandleFunc("GET /api/etf-groups", s.handleETFGroups)
@@ -102,6 +103,8 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	if tradeEng != nil {
 		s.mux.HandleFunc("GET /api/trade/account", s.handleTradeAccount)
 		s.mux.HandleFunc("GET /api/trade/positions", s.handleTradePositions)
+		s.mux.HandleFunc("POST /api/trade/positions/import", s.handleTradeImport)
+		s.mux.HandleFunc("GET /api/trade/guidance", s.handleTradeGuidance)
 		s.mux.HandleFunc("GET /api/trade/orders", s.handleTradeOrders)
 		s.mux.HandleFunc("POST /api/trade/orders", s.handleTradePlace)
 		s.mux.HandleFunc("DELETE /api/trade/orders", s.handleTradeCancel)
@@ -114,6 +117,9 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	// 分析系统 API（不依赖交易开关）
 	s.mux.HandleFunc("GET /api/analysis", s.handleAnalysis)
 	s.mux.HandleFunc("GET /api/analysis/watchlist", s.handleAnalysisWatchlist)
+	s.mux.HandleFunc("GET /api/analysis/reports", s.handleAnalysisReports)
+	s.mux.HandleFunc("GET /api/analysis/report", s.handleAnalysisReport)
+	s.mux.HandleFunc("GET /api/analysis/backtest", s.handleAnalysisBacktest)
 	return s, nil
 }
 
@@ -137,6 +143,7 @@ func initTrading(cfg *config.Config) (*trading.Engine, error) {
 
 // Serve 启动 HTTP 服务（阻塞）。
 func (s *Server) Serve() error {
+	s.startArchive()
 	log.Printf("[Web] 面板已启动: http://localhost%s", s.cfg.Server.Addr)
 	return http.ListenAndServe(s.cfg.Server.Addr, s.mux)
 }
@@ -235,7 +242,7 @@ func isUSSecid(secid string) bool {
 }
 
 // handleKline GET /api/kline?secid=1.000001&limit=120 — 日 K 走势。
-// 板块 secid（pt 前缀）走腾讯；其余按路由顺序尝试（东财/新浪）。
+// 板块 secid（pt 前缀）走腾讯；其余按路由顺序尝试（kline 功能默认前复权源优先）。
 // 美股 secid 固定东财（新浪 getKLineData 仅支持 sh/sz）。
 func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 	secid := r.URL.Query().Get("secid")
@@ -262,9 +269,18 @@ func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order := []source.Source{s.klineEM, s.klineSina}
-	if source.GetRouting(source.FeatKline) == source.SrcSina && !isUSSecid(secid) {
-		order = []source.Source{s.klineSina, s.klineEM}
+	order := make([]source.Source, 0, 3)
+	for _, name := range source.PairFor(source.FeatKline) {
+		switch name {
+		case source.SrcTencent:
+			order = append(order, s.klineTencent)
+		case source.SrcEastmoney:
+			order = append(order, s.klineEM)
+		case source.SrcSina:
+			if !isUSSecid(secid) { // 新浪 getKLineData 仅支持 sh/sz
+				order = append(order, s.klineSina)
+			}
+		}
 	}
 	var lastErr error
 	for _, src := range order {

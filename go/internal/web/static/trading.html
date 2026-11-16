@@ -35,6 +35,13 @@
   .bt-stats .item .k { font-size: var(--font-meta); color: var(--text-tertiary); }
   .bt-stats .item .v { font-size: 18px; font-weight: 620; letter-spacing: -0.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
   .muted-note { font-size: var(--font-meta); color: var(--text-tertiary); margin-top: 6px; line-height: 1.6; }
+  /* 交易指导 */
+  .g-note { font-size: var(--font-meta); color: var(--warning); background: rgba(214,168,95,.11); border: 1px solid rgba(214,168,95,.24); border-radius: var(--radius-sm); padding: 5px 9px; margin-top: 6px; }
+  .act { display: inline-block; padding: 1px 8px; border-radius: var(--radius-sm); font-size: var(--font-meta); font-weight: 620; border: 1px solid transparent; }
+  .act-buy { background: var(--danger-subtle); color: var(--up); border-color: rgba(217,107,114,.24); }
+  .act-sell { background: var(--success-subtle); color: var(--down); border-color: rgba(101,185,143,.24); }
+  .act-hold { background: rgba(255,255,255,.07); color: var(--text-tertiary); border-color: var(--border-default); }
+  .g-reason { font-size: var(--font-meta); color: var(--text-tertiary); line-height: 1.5; max-width: 320px; }
 </style></head>
 <body>
 <header>
@@ -56,7 +63,8 @@
   </section>
 
   <div class="tabs" style="margin-bottom:16px">
-    <button id="tabTrade" class="on">交易下单</button>
+    <button id="tabGuide" class="on">交易指导</button>
+    <button id="tabTrade">交易下单</button>
     <button id="tabPos">持仓</button>
     <button id="tabOrders">订单/成交</button>
     <button id="tabSignal">策略信号</button>
@@ -64,6 +72,46 @@
   </div>
 
   <!-- 交易下单 -->
+  <div id="secGuide">
+    <div class="panel">
+      <h2>风险概览 <span class="hint">仓位约束来自 config.yaml trading（单票 30% / 总仓位 80%）· 研判来自分析页</span></h2>
+      <div class="acct-cards" id="guideRisk"></div>
+      <div id="guideNotes"></div>
+    </div>
+    <div class="panel">
+      <h2>持仓处置建议</h2>
+      <table>
+        <thead><tr>
+          <th>名称</th><th>数量</th><th>成本</th><th>现价</th><th>浮盈</th><th>仓位</th>
+          <th>研判</th><th>建议</th><th>建议价</th><th>止损</th><th>理由</th>
+        </tr></thead>
+        <tbody id="guideHold"><tr><td colspan="11" class="loading">生成指导中（首次约 3-8 秒）…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>候选买入 <span class="hint">按最近交易日分析评分排序 · 只留买得起整手的 · 建议挂支撑附近不追高</span></h2>
+      <div class="chips" id="guideGroup"><span class="chip on" data-g="">全部分组</span></div>
+      <table>
+        <thead><tr>
+          <th>名称</th><th>现价</th><th>评分</th><th>建议价</th><th>可买数量</th><th>占用资金</th>
+          <th>止损</th><th>压力位</th><th>理由</th><th class="nosort">操作</th>
+        </tr></thead>
+        <tbody id="guideCand"><tr><td colspan="10" class="loading">生成指导中 …</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>期初持仓导入 <span class="hint">账户外已有持仓登记，不动现金、不生成成交；重复导入同一只按覆盖处理</span></h2>
+      <div class="order-form">
+        <input id="impSecid" placeholder="secid 如 0.000568" style="width:150px">
+        <input id="impCode" placeholder="代码 000568" style="width:110px">
+        <input id="impName" placeholder="名称 泸州老窖" style="width:130px">
+        <input id="impQty" type="number" min="1" placeholder="数量 200" style="width:110px">
+        <input id="impCost" type="number" step="0.01" min="0" placeholder="成本价" style="width:110px">
+        <button class="btn" id="btnImport">导入持仓</button>
+      </div>
+    </div>
+  </div>
+
   <div id="secTrade">
     <div class="panel">
       <h2>下单</h2>
@@ -183,12 +231,13 @@ async function loadAccount() {
     const cards = [
       ["总资产", fmtMoney(a.total_asset)],
       ["可用现金", fmtMoney(a.cash)],
+      ...(a.frozen_cash > 0 ? [["挂单冻结", fmtMoney(a.frozen_cash)]] : []),
       ["持仓市值", fmtMoney(a.market_value)],
       ["累计盈亏", (a.total_profit >= 0 ? "+" : "") + fmtMoney(a.total_profit) + " (" + (a.total_profit_pct >= 0 ? "+" : "") + a.total_profit_pct.toFixed(2) + "%)"],
     ];
     const cls = a.total_profit >= 0 ? "up" : "down";
     $("acctCards").innerHTML = cards.map(([k, v], i) =>
-      `<div class="card"><div class="k">${k}</div><div class="v ${i === 3 ? cls : ""}">${v}</div></div>`).join("");
+      `<div class="card"><div class="k">${k}</div><div class="v ${i === cards.length - 1 ? cls : ""}">${v}</div></div>`).join("");
   } catch (e) {
     $("acctCards").innerHTML = `<div class="card"><div class="k">加载失败</div><div class="v">${e.message}</div></div>`;
   }
@@ -411,14 +460,123 @@ async function placeOrder() {
   }
 }
 
+/* ---------- 交易指导 ---------- */
+let guideGroup = "";
+const actCls = a => a === "买入" || a === "加仓" ? "act-buy" : (a === "减仓" || a === "清仓" ? "act-sell" : "act-hold");
+
+async function loadGuidance() {
+  $("guideHold").innerHTML = `<tr><td colspan="11" class="loading">生成指导中（首次约 3-8 秒）…</td></tr>`;
+  $("guideCand").innerHTML = `<tr><td colspan="10" class="loading">生成指导中 …</td></tr>`;
+  try {
+    const r = await getJSON(`/api/trade/guidance?group=${encodeURIComponent(guideGroup)}&n=5`);
+    renderGuidance(r);
+  } catch (e) {
+    $("guideHold").innerHTML = `<tr><td colspan="11" class="empty">指导生成失败：${e.message}</td></tr>`;
+    $("guideCand").innerHTML = `<tr><td colspan="10" class="empty">指导生成失败：${e.message}</td></tr>`;
+  }
+}
+
+function renderGuidance(r) {
+  const k = r.risk;
+  renderGroupChips(r.groups || []);
+  $("guideRisk").innerHTML = [
+    ["总资产", fmtMoney(k.total_asset)],
+    ["可用现金", fmtMoney(k.cash)],
+    ...(k.frozen_cash > 0 ? [["挂单冻结", fmtMoney(k.frozen_cash)]] : []),
+    ["持仓市值", fmtMoney(k.market_value)],
+    ["仓位", k.position_pct.toFixed(1) + "% / 上限 " + k.max_position_pct + "%"],
+    ["可投入预算", fmtMoney(k.deployable)],
+  ].map(([a, b]) => `<div class="card"><div class="k">${a}</div><div class="v">${b}</div></div>`).join("");
+  $("guideNotes").innerHTML = (k.notes || []).map(n => `<div class="g-note">⚠ ${n}</div>`).join("");
+
+  $("guideHold").innerHTML = (r.holdings || []).map(h => `<tr>
+    <td>${h.name} <span style="color:var(--muted);font-size:11px">${h.code}</span></td>
+    <td class="num">${h.qty}</td>
+    <td class="num">${fmt(h.avg_cost)}</td>
+    <td class="num">${fmt(h.price)}</td>
+    <td class="${h.profit >= 0 ? "up" : "down"}">${h.profit >= 0 ? "+" : ""}${fmtMoney(h.profit)}</td>
+    <td class="num">${h.weight_pct.toFixed(1)}%</td>
+    <td><span class="sig-badge ${h.score >= 65 ? "sig-buy" : (h.score >= 50 ? "sig-hold" : "sig-sell")}">${fmt(h.score, 1)} ${h.advice}</span></td>
+    <td><span class="act ${actCls(h.action)}">${h.action}</span>${h.suggest_qty ? " " + h.suggest_qty + " 股" : ""}</td>
+    <td class="num">${h.suggest_qty ? fmt(h.suggest_price) : "—"}</td>
+    <td class="num">${h.stop_loss ? fmt(h.stop_loss) : "—"}</td>
+    <td class="g-reason">${h.reason}</td>
+  </tr>`).join("") || `<tr><td colspan="11" class="empty">暂无持仓 — 在下方导入期初持仓，或到「交易下单」买入</td></tr>`;
+
+  $("guideCand").innerHTML = (r.candidates || []).map((c, i) => `<tr>
+    <td>${c.name} <span style="color:var(--muted);font-size:11px">${c.code}</span></td>
+    <td class="num">${fmt(c.price)}</td>
+    <td class="num">${fmt(c.score, 1)}</td>
+    <td class="num">${fmt(c.suggest_price)}</td>
+    <td class="num">${c.suggest_qty}</td>
+    <td class="num">${fmtMoney(c.amount)}</td>
+    <td class="num">${c.stop_loss ? fmt(c.stop_loss) : "—"}</td>
+    <td class="num">${c.resistance ? fmt(c.resistance) : "—"}</td>
+    <td class="g-reason">${c.reason}</td>
+    <td><button class="btn small" onclick='preFillOrder(${JSON.stringify(JSON.stringify({ secid: c.secid, code: c.code, name: c.name, price: c.suggest_price, qty: c.suggest_qty }))})'>去下单</button></td>
+  </tr>`).join("") || `<tr><td colspan="10" class="empty">暂无买得起的候选（可用现金不足一手，或该组评分都不够）</td></tr>`;
+}
+
+// 候选一键带入下单表单（限价单挂建议价）
+function preFillOrder(json) {
+  const c = JSON.parse(json);
+  $("oSecid").value = c.secid;
+  $("oCode").value = c.code;
+  $("oName").value = c.name;
+  $("oSide").value = "buy";
+  $("oType").value = "limit";
+  $("oPrice").value = c.price;
+  $("oQty").value = c.qty;
+  switchTab("Trade");
+  toast(`已带入 ${c.name}：限价 ${c.price} × ${c.qty} 股，确认后提交`);
+}
+
+// 分组筛选 chips（随指导响应一起渲染，保持当前选中）
+function renderGroupChips(groups) {
+  const cur = guideGroup;
+  if (!groups.length) return;
+  $("guideGroup").innerHTML = `<span class="chip${cur === "" ? " on" : ""}" data-g="">全部分组</span>` +
+    groups.map(g => `<span class="chip${g === cur ? " on" : ""}" data-g="${g}">${g}</span>`).join("");
+  document.querySelectorAll("#guideGroup .chip").forEach(c => {
+    c.onclick = () => {
+      document.querySelectorAll("#guideGroup .chip").forEach(x => x.classList.remove("on"));
+      c.classList.add("on");
+      guideGroup = c.dataset.g;
+      loadGuidance();
+    };
+  });
+}
+
+async function importPosition() {
+  const secid = $("impSecid").value.trim();
+  const qty = parseInt($("impQty").value, 10);
+  const cost = parseFloat($("impCost").value);
+  if (!secid) { toast("请输入 secid（如 0.000568）"); return; }
+  if (!qty || qty <= 0) { toast("请输入有效数量"); return; }
+  if (!cost || cost <= 0) { toast("请输入成本价"); return; }
+  try {
+    const r = await fetch("/api/trade/positions/import", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secid, code: $("impCode").value.trim(), name: $("impName").value.trim(), quantity: qty, avg_cost: cost }),
+    }).then(x => x.json());
+    if (r.error) { toast(r.error); return; }
+    toast(`已导入 ${qty} 股 ${$("impName").value.trim() || secid}`);
+    loadAccount(); loadPositions(); loadGuidance();
+  } catch (e) {
+    toast("导入失败：" + e.message);
+  }
+}
+
 /* ---------- Tab 切换 ---------- */
 function switchTab(name) {
-  ["tabTrade", "tabPos", "tabOrders", "tabSignal", "tabBacktest"].forEach(id => $(id).classList.toggle("on", id === "tab" + name));
-  ["secTrade", "secPos", "secOrders", "secSignal", "secBacktest"].forEach(id => $(id).style.display = id === "sec" + name ? "" : "none");
+  ["tabGuide", "tabTrade", "tabPos", "tabOrders", "tabSignal", "tabBacktest"].forEach(id => $(id).classList.toggle("on", id === "tab" + name));
+  ["secGuide", "secTrade", "secPos", "secOrders", "secSignal", "secBacktest"].forEach(id => $(id).style.display = id === "sec" + name ? "" : "none");
+  if (name === "Guide") loadGuidance();
   if (name === "Pos") loadPositions();
   if (name === "Orders") { loadOrders(); loadTrades(); }
   if (name === "Signal") loadSignals();
 }
+$("tabGuide").onclick = () => switchTab("Guide");
 $("tabTrade").onclick = () => switchTab("Trade");
 $("tabPos").onclick = () => switchTab("Pos");
 $("tabOrders").onclick = () => switchTab("Orders");
@@ -437,12 +595,14 @@ document.querySelectorAll("#sigStrategy .chip").forEach(c => {
 
 $("btnPlace").onclick = placeOrder;
 $("btnBacktest").onclick = runBacktest;
+$("btnImport").onclick = importPosition;
 
 /* ---------- 初始化 ---------- */
 renderNav(NAV, "/trading.html");
 startClock();
 loadAccount();
 loadPending();
+switchTab("Guide"); // 默认落在交易指导
 setInterval(loadAccount, 30000);
 setInterval(loadPending, 30000);
 </script>

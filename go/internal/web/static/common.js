@@ -96,61 +96,160 @@ function drawHint(ctx, w, h, text) {
   ctx.fillText(text, w / 2, h / 2);
 }
 
+/* ---------- 十字光标（共享，由 drawTimeSeries 自动绑定） ----------
+ * 指针在画布上滑动时：竖线吸附到最近数据点并在底部显示该点日期，
+ * 横线穿过该点并在右侧刻度栏显示对应价格。
+ */
+function chipText(ctx, text, cx, cy) {
+  ctx.font = "11px " + cssVar("--font-mono", "monospace");
+  const wpx = ctx.measureText(text).width + 10;
+  const hpx = 16;
+  const x = cx - wpx / 2, y = cy - hpx / 2;
+  ctx.fillStyle = cssVar("--bg-input", "#191a1f");
+  ctx.strokeStyle = cssVar("--border-strong", "rgba(255,255,255,.18)");
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  // 老浏览器无 roundRect 时退化为直角矩形
+  if (ctx.roundRect) ctx.roundRect(x, y, wpx, hpx, 3); else ctx.rect(x, y, wpx, hpx);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = cssVar("--text-primary", "#e8eaed");
+  ctx.textAlign = "center";
+  ctx.fillText(text, cx, cy + 4);
+}
+
+function drawCrosshair(ctx, st, hover) {
+  const { pts, X, Y, pad, w, h, digits } = st;
+  if (!pts.length) return;
+  const i = Math.max(0, Math.min(pts.length - 1, hover.i | 0));
+  const px = X(i), py = Y(pts[i].y);
+  ctx.save();
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = cssVar("--border-strong", "rgba(255,255,255,.18)");
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(px, pad.t); ctx.lineTo(px, h - pad.b); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad.l, py); ctx.lineTo(w - pad.r, py); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = st.color;
+  ctx.beginPath(); ctx.arc(px, py, 2.6, 0, Math.PI * 2); ctx.fill();
+  // 日期标签（底部，越界时向内收）
+  const date = String(pts[i].x).slice(5, 16).replace("T", " ");
+  ctx.font = "11px " + cssVar("--font-mono", "monospace");
+  const half = ctx.measureText(date).width / 2 + 6;
+  chipText(ctx, date, Math.max(pad.l + half, Math.min(w - pad.r - half, px)), h - pad.b / 2 - 1);
+  // 价格标签（右侧刻度栏，跟随横线）
+  chipText(ctx, pts[i].y.toFixed(digits), w - pad.r / 2, Math.max(pad.t + 8, Math.min(h - pad.b - 8, py)));
+  ctx.restore();
+}
+
+function bindCrosshair(canvas) {
+  if (canvas._chBound) return;
+  canvas._chBound = true;
+  let raf = 0;
+  const schedule = () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const st = canvas._chart;
+      if (st) st.render(st.hover);
+    });
+  };
+  const move = e => {
+    const st = canvas._chart;
+    if (!st) return;
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const i = Math.round((px - st.pad.l) / (st.plotW || 1) * (st.pts.length - 1));
+    st.hover = { i: Math.max(0, Math.min(st.pts.length - 1, i)) };
+    schedule();
+  };
+  canvas.addEventListener("pointermove", move);
+  canvas.addEventListener("pointerdown", move);
+  canvas.addEventListener("pointerup", move);
+  canvas.addEventListener("pointerleave", () => {
+    const st = canvas._chart;
+    if (!st) return;
+    st.hover = null;
+    schedule();
+  });
+}
+
 function drawTimeSeries(canvas, data, opts) {
   opts = opts || {};
   const { ctx, w, h } = setupCanvas(canvas, opts.height || 260);
-  ctx.clearRect(0, 0, w, h);
   const pts = data.map(d => ({ x: d.date, y: d.close }));
   if (pts.length < 2) {
+    canvas._chart = null;
+    ctx.clearRect(0, 0, w, h);
     drawHint(ctx, w, h, opts.emptyText || "暂无数据");
     return;
   }
   const pad = { l: 10, r: 64, t: 14, b: 24 };
+  // 基准价（分时昨收）：休市时兜底源会返回 0，需当作无效基准，否则 min 被拉到 0 压塌 Y 轴
+  const base = opts.base > 0 ? opts.base : null;
   const ys = pts.map(p => p.y);
   let min = Math.min(...ys), max = Math.max(...ys);
-  if (opts.base != null) {
-    min = Math.min(min, opts.base); max = Math.max(max, opts.base);
+  if (base != null) {
+    min = Math.min(min, base); max = Math.max(max, base);
   }
   const span = (max - min) || 1;
   const X = i => pad.l + (w - pad.l - pad.r) * i / (pts.length - 1);
   const Y = v => pad.t + (h - pad.t - pad.b) * (1 - (v - min) / span);
-
-  // 网格 + 右侧刻度
   const digits = opts.labelDigits != null ? opts.labelDigits : 1;
-  ctx.strokeStyle = cssVar("--border-subtle", "rgba(255,255,255,.065)");
-  ctx.fillStyle = cssVar("--text-tertiary", "#777b85");
-  ctx.font = "11px " + cssVar("--font-mono", "monospace");
-  ctx.textAlign = "left";
-  for (let g = 0; g <= 4; g++) {
-    const v = min + span * g / 4, y = Y(v);
-    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
-    ctx.fillText(v.toFixed(digits), w - pad.r + 6, y + 4);
-  }
-  // 基准中轴（分时昨收）
-  if (opts.showBaseLine && opts.base != null) {
-    ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = cssVar("--text-disabled", "#565a63");
-    ctx.beginPath(); ctx.moveTo(pad.l, Y(opts.base)); ctx.lineTo(w - pad.r, Y(opts.base)); ctx.stroke();
-    ctx.setLineDash([]);
-  }
 
   // 折线颜色：优先显式指定，否则按首尾相对涨跌（A股红涨绿跌，取主题柔和色）
   const last = pts[pts.length - 1].y, first = pts[0].y;
-  const base = opts.base != null ? opts.base : first;
+  const ref = base != null ? base : first;
   const upColor = cssVar("--up", "#d96b72"),
     downColor = cssVar("--down", "#65b98f"),
     flatColor = cssVar("--text-tertiary", "#777b85");
-  ctx.strokeStyle = opts.lineColor || (last > base ? upColor : (last < base ? downColor : flatColor));
-  ctx.lineWidth = 1.6;
-  ctx.beginPath();
-  pts.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.y)) : ctx.moveTo(X(i), Y(p.y)));
-  ctx.stroke();
+  const color = opts.lineColor || (last > ref ? upColor : (last < ref ? downColor : flatColor));
 
-  // X 轴首尾标签
-  ctx.fillStyle = cssVar("--text-tertiary", "#777b85");
-  ctx.font = "11px " + cssVar("--font-mono", "monospace");
-  ctx.textAlign = "left";
-  ctx.fillText(String(pts[0].x).slice(5, 16).replace("T", " "), pad.l, h - 6);
-  ctx.textAlign = "right";
-  ctx.fillText(String(pts[pts.length - 1].x).slice(5, 16).replace("T", " "), w - pad.r, h - 6);
+  const st = {
+    pts, X, Y, pad, w, h, min, max, span, digits, color, opts,
+    plotW: w - pad.l - pad.r,
+    hover: null,
+  };
+  st.render = hover => {
+    ctx.clearRect(0, 0, w, h);
+    // 网格 + 右侧刻度
+    ctx.strokeStyle = cssVar("--border-subtle", "rgba(255,255,255,.065)");
+    ctx.fillStyle = cssVar("--text-tertiary", "#777b85");
+    ctx.font = "11px " + cssVar("--font-mono", "monospace");
+    ctx.textAlign = "left";
+    for (let g = 0; g <= 4; g++) {
+      const v = min + span * g / 4, y = Y(v);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+      ctx.fillText(v.toFixed(digits), w - pad.r + 6, y + 4);
+    }
+    // 基准中轴（分时昨收）
+    if (opts.showBaseLine && base != null) {
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = cssVar("--text-disabled", "#565a63");
+      ctx.beginPath(); ctx.moveTo(pad.l, Y(base)); ctx.lineTo(w - pad.r, Y(base)); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // 折线
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    pts.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.y)) : ctx.moveTo(X(i), Y(p.y)));
+    ctx.stroke();
+    // X 轴首尾标签
+    ctx.fillStyle = cssVar("--text-tertiary", "#777b85");
+    ctx.font = "11px " + cssVar("--font-mono", "monospace");
+    ctx.textAlign = "left";
+    ctx.fillText(String(pts[0].x).slice(5, 16).replace("T", " "), pad.l, h - 6);
+    ctx.textAlign = "right";
+    ctx.fillText(String(pts[pts.length - 1].x).slice(5, 16).replace("T", " "), w - pad.r, h - 6);
+    if (hover) drawCrosshair(ctx, st, hover);
+  };
+
+  // 同一份数据刷新时保留光标位置，换标的则重置
+  const sig = pts.length + "|" + pts[0].x + "|" + pts[pts.length - 1].x;
+  const prev = canvas._chart;
+  if (prev && prev.sig === sig && prev.hover) st.hover = prev.hover;
+  st.sig = sig;
+  canvas._chart = st;
+  bindCrosshair(canvas);
+  st.render(st.hover);
 }

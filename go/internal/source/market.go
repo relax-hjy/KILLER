@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	sortpkg "sort"
 	"strings"
 	"time"
@@ -246,6 +247,63 @@ func fetchStocksEM(ctx context.Context, page, pz int, sortFid string, asc bool) 
 	return out, total, nil
 }
 
+// emSuggestURL 东财代码搜索：中文/拼音/代码都能命中，直接返回带市场前缀的 QuoteID（即 secid）。
+// 新浪 suggest 不支持中文（2026-11-16 实测），全市场关键词搜索只有东财提供。
+const emSuggestURL = "https://searchapi.eastmoney.com/api/suggest/get?input=%s&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=%d"
+
+type suggestRow struct {
+	Code    string `json:"Code"`
+	Name    string `json:"Name"`
+	QuoteID string `json:"QuoteID"`
+}
+
+// FetchStockSuggest 按关键词搜索沪深北 A 股，返回仅含 SecID/Code/Name 的候选（保留东财相关度顺序）。
+func FetchStockSuggest(ctx context.Context, keyword string, count int) ([]model.Stock, error) {
+	if count <= 0 || count > 20 {
+		count = 10
+	}
+	reqURL := fmt.Sprintf(emSuggestURL, url.QueryEscape(keyword), count)
+	body, err := getJSONRaw(ctx, reqURL)
+	if err != nil {
+		return nil, fmt.Errorf("suggest 请求失败: %w", err)
+	}
+	var root struct {
+		QuotationCodeTable struct {
+			Data []suggestRow `json:"Data"`
+		} `json:"QuotationCodeTable"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return nil, fmt.Errorf("suggest 解析失败: %w", err)
+	}
+	var out []model.Stock
+	for _, d := range root.QuotationCodeTable.Data {
+		if !isAShareSecid(d.QuoteID) {
+			continue
+		}
+		out = append(out, model.Stock{SecID: d.QuoteID, Code: d.Code, Name: d.Name})
+	}
+	return out, nil
+}
+
+// isAShareSecid 判断搜索结果的 QuoteID 是否沪深北 A 股，代码段口径与 fetchStocksEM 的 fs 一致。
+// 不看东财的 Classify/SecurityTypeName：科创板被写成数字分类"23"、京 A 写成"NEEQ"，
+// 按分类白名单会漏掉整个科创板（2026-11-16 实测）。
+// 排除项：沪指数 1.000xxx、深指数 0.399xxx、ETF 1.5xxxxx/0.15xxxx、B 股 1.900xxx/0.200xxx、
+// 港股/美股/板块（市场号非 0/1）、新三板老代码 83/87/43（2026-09 起已迁为 92 段）。
+func isAShareSecid(secid string) bool {
+	market, code, ok := strings.Cut(secid, ".")
+	if !ok || len(code) != 6 {
+		return false
+	}
+	switch market {
+	case "1": // 沪市：主板 60、科创板/CDR 68
+		return strings.HasPrefix(code, "60") || strings.HasPrefix(code, "68")
+	case "0": // 深市：主板 00、创业板 30；北交所 92
+		return strings.HasPrefix(code, "00") || strings.HasPrefix(code, "30") || strings.HasPrefix(code, "92")
+	}
+	return false
+}
+
 // ---- A股 ETF ----
 
 // IsETFSecid 判断是否 A股 ETF secid（沪 1.5xxxxx / 深 0.159xxxx / 深 0.150xxxx 等）。
@@ -422,7 +480,7 @@ func parseStock(raw json.RawMessage, now time.Time) (model.Stock, error) {
 const usListFields = stockFields
 
 // FetchUSStocks 美股列表分页。market: "105"纳斯达克 "106"纽交所 "107"美交所，空=全部。
-// sortFid 默认 f6 成交额（活跃度）。
+// sortFid 含义同 FetchStocks，默认 f20 总市值（web 层兜底）。
 func FetchUSStocks(ctx context.Context, page, pz int, sortFid, market string, asc bool) ([]model.Stock, int, error) {
 	fs := "m:105+m:106+m:107+f:!50"
 	if market != "" {

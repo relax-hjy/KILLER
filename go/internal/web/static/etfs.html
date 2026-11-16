@@ -36,6 +36,21 @@
 }
 #dHoldings td:nth-child(3), #dHoldings td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
 #dHoldings th:nth-child(3), #dHoldings th:nth-child(4) { text-align: right; }
+
+/* 详情抽屉：综合研判（复用 /api/analysis，与分析页同一套结论与配色） */
+.asm-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-top: 10px; }
+.asm-score { font-family: var(--font-display); font-size: 26px; font-weight: 660; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.asm-den { font-size: var(--font-meta); color: var(--text-tertiary); }
+.asm-advice { font-size: var(--font-meta); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-strong); }
+.asm-advice.adv-buy  { background: rgba(217,107,114,.12); color: var(--up); border-color: rgba(217,107,114,.26); }
+.asm-advice.adv-hold { background: rgba(214,168,95,.11);  color: var(--warning); border-color: rgba(214,168,95,.24); }
+.asm-advice.adv-sell { background: rgba(101,185,143,.11); color: var(--down); border-color: rgba(101,185,143,.24); }
+.asm-summary { font-size: var(--font-table); color: var(--text-secondary); line-height: 1.7; margin: 8px 0 10px; }
+.asm-fd { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 8px; }
+.asm-fd > div { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 8px 10px; }
+.asm-fd .t { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--font-meta); color: var(--text-tertiary); }
+.asm-fd .v { font-family: var(--font-display); font-size: 15px; font-weight: 640; }
+.asm-fd .r { font-size: var(--font-meta); color: var(--text-tertiary); line-height: 1.5; margin-top: 3px; }
 </style>
 </head>
 <body>
@@ -100,6 +115,11 @@
   </div>
   <canvas id="dChart"></canvas>
   <div class="kpis" id="dKpis"></div>
+  <div class="hold-head">
+    <span class="hold-title">综合研判</span>
+    <span class="hold-period" id="dAsmMeta"></span>
+  </div>
+  <div id="dAsm"><div class="hold-note">分析加载中 …</div></div>
   <div class="hold-head">
     <span class="hold-title">成分股（前十大重仓）</span>
     <span class="hold-period" id="dHoldPeriod"></span>
@@ -243,9 +263,48 @@ function openDetail(s) {
   ].map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   $("detail").classList.add("open");
   loadDetailChart();
+  loadAnalysis(s);
   loadHoldings(s);
 }
 function closeDetail() { $("detail").classList.remove("open"); STATE.detail = null; }
+
+// ---- 综合研判（/api/analysis 按 120 根日 K 打分，个股与 ETF 同一套模型）----
+const scoreColor = v => v >= 65 ? "var(--up)" : (v >= 50 ? "var(--warning)" : "var(--down)");
+const adviceClass = a => {
+  if (a.includes("买入") && !a.includes("暂缓")) return "adv-buy";
+  if (a === "观望，回踩支撑再介入") return "adv-hold";
+  return "adv-sell";
+};
+async function loadAnalysis(s) {
+  const box = $("dAsm"), meta = $("dAsmMeta");
+  meta.textContent = "";
+  box.innerHTML = `<div class="hold-note">研判生成中（首次约 1-3 秒）…</div>`;
+  if (!s || !s.secid) { box.innerHTML = `<div class="hold-note">缺少 secid，无法分析</div>`; return; }
+  try {
+    const a = await getJSON(`/api/analysis?secid=${encodeURIComponent(s.secid)}&name=${encodeURIComponent(s.name || "")}`);
+    renderAnalysis(a);
+  } catch (e) {
+    box.innerHTML = `<div class="hold-note">研判暂不可用（${e.message}）</div>`;
+  }
+}
+function renderAnalysis(a) {
+  $("dAsmMeta").textContent = `日 K ${a.kline_count} 根 · 截至 ${a.kline_date}`;
+  $("dAsm").innerHTML = `
+    <div class="asm-head">
+      <span class="asm-score" style="color:${scoreColor(a.score)}">${a.score.toFixed(1)}</span>
+      <span class="asm-den">/ 100 综合评分</span>
+      <span class="asm-advice ${adviceClass(a.advice)}">${a.advice}</span>
+    </div>
+    <div class="asm-summary">${a.summary}</div>
+    <div class="asm-fd">${(a.findings || []).map(f => {
+      const c = f.score >= 20 ? "var(--up)" : (f.score <= -20 ? "var(--down)" : "var(--text-tertiary)");
+      return `<div>
+        <div class="t"><span>${f.title}</span><span>${f.verdict}</span></div>
+        <div class="v" style="color:${c}">${f.score > 0 ? "+" : ""}${f.score.toFixed(0)}</div>
+        <div class="r">${f.reason}</div>
+      </div>`;
+    }).join("")}</div>`;
+}
 
 // ---- 成分股（前十大重仓，/api/etf-holdings）----
 async function loadHoldings(s) {

@@ -20,7 +20,8 @@ func loadKlinesForBacktest(ctx context.Context, secid string) ([]model.Kline, er
 		}
 		return kl.FetchKline(ctx, secid, 500)
 	}
-	for _, name := range []string{"eastmoney", "sina"} {
+	// 前复权源优先（腾讯 qfq / 东财 fqt=1），新浪无复权参数只兜底
+	for _, name := range []string{"tencent", "eastmoney", "sina"} {
 		kl, err := source.New(name)
 		if err != nil {
 			continue

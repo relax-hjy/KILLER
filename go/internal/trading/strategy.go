@@ -64,8 +64,9 @@ func LoadKlines(ctx context.Context, secid string, limit int) ([]model.Kline, er
 		}
 		return kl.FetchKline(ctx, secid, limit)
 	}
-	// 个股/指数：东财优先，新浪兜底
-	for _, name := range []string{"eastmoney", "sina"} {
+	// 个股/指数：前复权源优先（腾讯 qfq / 东财 fqt=1），新浪无复权参数只兜底——
+	// 不复权K线的除权假跳空会让评分与回测失真
+	for _, name := range []string{"tencent", "eastmoney", "sina"} {
 		kl, err := source.New(name)
 		if err != nil {
 			continue

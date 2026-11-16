@@ -32,16 +32,29 @@
 
   <!-- 全市场 -->
   <div class="toolbar">
-    <input id="q" placeholder="输入代码筛选当前页（如 600519）" style="width:240px">
+    <input id="q" placeholder="代码/名称/拼音搜索全市场（6 位代码直达）" style="width:240px">
     <select id="sort">
+      <option value="f20" selected>按总市值</option>
       <option value="f3">按涨幅</option>
       <option value="f3asc">按跌幅</option>
       <option value="f6">按成交额</option>
       <option value="f8">按换手率</option>
-      <option value="f20">按总市值</option>
       <option value="f12">按代码</option>
     </select>
     <span class="hint">点击行查看日K/分时详情 · 点★加/移出自选 · 30 秒刷新</span>
+  </div>
+
+  <!-- 全市场搜索结果（联想） -->
+  <div class="panel" id="searchPanel" style="display:none">
+    <h2>全市场匹配 <span class="hint" id="searchHint"></span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>代码</th><th>名称</th><th>现价</th><th>涨跌幅</th><th>成交额</th><th>总市值</th><th class="nosort">自选</th>
+        </tr>
+      </thead>
+      <tbody id="searchBody"></tbody>
+    </table>
   </div>
 
   <div class="panel">
@@ -79,7 +92,7 @@
 <script src="/common.js"></script>
 <script>
 "use strict";
-const STATE = { page: 1, sort: "f3", asc: false, total: 0, stocks: [], watch: [], q: "", detail: null, detailTab: "kline" };
+const STATE = { page: 1, sort: "f20", asc: false, total: 0, stocks: [], watch: [], q: "", search: [], detail: null, detailTab: "kline" };
 
 // ---- 自选 ----
 async function loadWatch() {
@@ -138,8 +151,7 @@ async function loadStocks() {
   }
 }
 function renderStocks() {
-  const q = STATE.q.trim();
-  const rows = STATE.stocks.filter(s => !q || s.code.includes(q) || s.name.includes(q));
+  const rows = STATE.stocks;
   $("pageInfo").textContent = `第 ${STATE.page} 页 / 共 ${Math.max(1, Math.ceil(STATE.total / 50))} 页 · ${STATE.total} 只`;
   $("prev").disabled = STATE.page <= 1;
   $("body").innerHTML = rows.map(s => `
@@ -154,6 +166,54 @@ function renderStocks() {
       <td>${fmtCap(s.market_cap)}</td>
     </tr>`).join("") || `<tr><td colspan="8" class="empty">本页无匹配</td></tr>`;
 }
+
+// ---- 全市场搜索 ----
+// 主表只有 50 行，翻页前的输入框过滤等于"搜不到"，所以关键词一律走后端联想。
+let searchTimer = 0;
+let searchSeq = 0;
+async function searchGlobal(kw) {
+  const panel = $("searchPanel");
+  if (!kw) { panel.style.display = "none"; STATE.search = []; return; }
+  const seq = ++searchSeq;
+  panel.style.display = "";
+  $("searchHint").textContent = `搜索「${kw}」…`;
+  $("searchBody").innerHTML = `<tr><td colspan="7" class="loading">搜索中 …</td></tr>`;
+  try {
+    const r = await getJSON(`/api/stocks/search?q=${encodeURIComponent(kw)}&n=10`);
+    if (seq !== searchSeq) return; // 输入已被更新一次按键取代
+    STATE.search = r.items;
+    renderSearch(kw);
+    // 6 位代码精确命中 → 直达详情
+    if (/^\d{6}$/.test(kw) && r.items.length && r.items[0].code === kw) openDetail(r.items[0]);
+  } catch (e) {
+    if (seq !== searchSeq) return;
+    STATE.search = [];
+    $("searchHint").textContent = `搜索「${kw}」`;
+    $("searchBody").innerHTML = `<tr><td colspan="7" class="empty">搜索失败：${e.message}</td></tr>`;
+  }
+}
+function renderSearch(kw) {
+  const items = STATE.search;
+  $("searchHint").textContent = `搜索「${kw}」· ${items.length} 只`;
+  $("searchBody").innerHTML = items.map(s => `
+    <tr data-secid="${s.secid}">
+      <td>${s.code}</td>
+      <td>${s.name || "—"}</td>
+      <td>${s.price ? fmt(s.price) : "—"}</td>
+      <td class="${cls(s.pct)}">${s.price ? pctStr(s.pct) : "—"}</td>
+      <td>${fmtAmt(s.amount)}</td>
+      <td>${fmtCap(s.market_cap)}</td>
+      <td><span class="star${isWatched(s.secid) ? " on" : ""}" title="${isWatched(s.secid) ? "移出自选" : "加入自选"}">★</span></td>
+    </tr>`).join("") || `<tr><td colspan="7" class="empty">无匹配 A 股（本搜索只覆盖沪深北，不含港股/美股/基金）</td></tr>`;
+}
+$("searchBody").addEventListener("click", async e => {
+  const tr = e.target.closest("tr");
+  if (!tr || !tr.dataset.secid) return;
+  const s = STATE.search.find(x => x.secid === tr.dataset.secid);
+  if (!s) return;
+  if (e.target.closest(".star")) { await toggleWatch(s); renderSearch(STATE.q.trim()); return; }
+  openDetail(s);
+});
 
 $("body").addEventListener("click", async e => {
   const tr = e.target.closest("tr");
@@ -235,7 +295,12 @@ $("dIntraday").onclick = () => {
   loadDetailChart();
 };
 
-$("q").addEventListener("input", e => { STATE.q = e.target.value; renderStocks(); });
+$("q").addEventListener("input", e => {
+  STATE.q = e.target.value;
+  const kw = STATE.q.trim();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => searchGlobal(kw), kw ? 350 : 0);
+});
 $("sort").addEventListener("change", e => {
   const v = e.target.value;
   if (v === "f3asc") { STATE.sort = "f3"; STATE.asc = true; }

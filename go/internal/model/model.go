@@ -45,6 +45,17 @@ type Alert struct {
 	TriggeredAt time.Time `json:"triggered_at"`
 }
 
+// AnalysisReport 分析日报：某标的某交易日的综合研判存档。
+type AnalysisReport struct {
+	SecID     string    `json:"secid"`
+	Date      string    `json:"date"` // 报告所属交易日（最新日 K 日期 YYYY-MM-DD）
+	Name      string    `json:"name"`
+	Score     float64   `json:"score"`
+	Advice    string    `json:"advice"`
+	Payload   string    `json:"-"` // 完整研判结论 JSON（列表查询不返回）
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func (a Alert) String() string {
 	return "[" + a.Type + "] " + a.Name +
 		" 当前=" + strconv.FormatFloat(a.Value, 'f', 2, 64) + "%" +

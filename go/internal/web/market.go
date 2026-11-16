@@ -3,18 +3,21 @@ package web
 // 市场扩展 API：
 //   GET    /api/boards?kind=&sort=        A股板块（行业/概念）
 //   GET    /api/board-members?secid=      板块成分股（东财专属）
-//   GET    /api/stocks?page=&sort=&asc=   A股个股分页
+//   GET    /api/stocks?page=&sort=&asc=   A股个股分页（默认按总市值降序）
+//   GET    /api/stocks/search?q=&n=       A股个股全市场关键词搜索
 //   GET    /api/us/overview               美股三大指数 + SPDR 板块
 //   GET    /api/us/stocks?page=&market=   美股个股分页
 //   GET    /api/ndx                       纳指100成分+行情
 //   GET    /watch                         自选个股 CRUD
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"killer/internal/cache"
 	"killer/internal/model"
@@ -68,7 +71,7 @@ func (s *Server) handleBoardMembers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, members)
 }
 
-// handleStocks GET /api/stocks?page=1&sort=f3&asc=0
+// handleStocks GET /api/stocks?page=1&sort=f20&asc=0（默认按总市值降序）
 func (s *Server) handleStocks(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page <= 0 {
@@ -77,7 +80,7 @@ func (s *Server) handleStocks(w http.ResponseWriter, r *http.Request) {
 	sort := r.URL.Query().Get("sort")
 	valid := map[string]bool{"f3": true, "f6": true, "f8": true, "f9": true, "f20": true, "f21": true, "f12": true}
 	if !valid[sort] {
-		sort = "f3"
+		sort = "f20"
 	}
 	asc := r.URL.Query().Get("asc") == "1"
 	key := "stocks:" + strconv.Itoa(page) + ":" + sort + ":" + strconv.FormatBool(asc)
@@ -104,6 +107,66 @@ func (s *Server) handleStocks(w http.ResponseWriter, r *http.Request) {
 		stocks = []model.Stock{}
 	}
 	writeJSON(w, resp{Items: stocks, Total: total, Page: page})
+}
+
+// handleStockSearch GET /api/stocks/search?q=茅台&n=10 — 全市场关键词搜索（代码/名称/拼音）。
+// 联想只给 secid+代码+名称，这里再合并一次批量行情，让前端点候选能直接开完整详情。
+func (s *Server) handleStockSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeJSON(w, map[string]any{"keyword": q, "items": []model.Stock{}})
+		return
+	}
+	n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+	if n <= 0 || n > 20 {
+		n = 10
+	}
+	v, err := marketCache.GetOrSet("stocksearch:"+q+":"+strconv.Itoa(n), 60*time.Second, func() (any, error) {
+		return s.searchStocks(r.Context(), q, n)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	items, _ := v.([]model.Stock)
+	if items == nil {
+		items = []model.Stock{}
+	}
+	writeJSON(w, map[string]any{"keyword": q, "items": items})
+}
+
+func (s *Server) searchStocks(ctx context.Context, q string, n int) ([]model.Stock, error) {
+	cands, err := source.FetchStockSuggest(ctx, q, n)
+	if err != nil {
+		return nil, err
+	}
+	if len(cands) == 0 {
+		return cands, nil
+	}
+	secids := make([]string, len(cands))
+	for i, c := range cands {
+		secids[i] = c.SecID
+	}
+	quotes, err := source.FetchUSQuotes(ctx, secids)
+	if err != nil {
+		// 联想结果已可用，缺行情只是详情 KPI 少几项，不判定搜索失败
+		log.Printf("[Web] 搜索行情合并失败: %v", err)
+		return cands, nil
+	}
+	bySecid := make(map[string]model.Stock, len(quotes))
+	for _, qt := range quotes {
+		bySecid[qt.SecID] = qt
+	}
+	out := make([]model.Stock, 0, len(cands))
+	for _, c := range cands {
+		if qt, ok := bySecid[c.SecID]; ok {
+			qt.Name = c.Name // 名称以联想为准，避免停牌股返回空名
+			out = append(out, qt)
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 // handleETFs GET /api/etfs?page=1&sort=f3&asc=0 — 全市场 ETF 分页（东财 clist）。
@@ -266,7 +329,7 @@ func (s *Server) handleUSOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, v)
 }
 
-// handleUSStocks GET /api/us/stocks?page=1&sort=f6&market=105|106|107&asc=
+// handleUSStocks GET /api/us/stocks?page=1&sort=f20&market=105|106|107&asc=（默认按总市值降序）
 func (s *Server) handleUSStocks(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page <= 0 {
@@ -274,7 +337,7 @@ func (s *Server) handleUSStocks(w http.ResponseWriter, r *http.Request) {
 	}
 	sort := r.URL.Query().Get("sort")
 	if sort == "" {
-		sort = "f6"
+		sort = "f20"
 	}
 	market := r.URL.Query().Get("market")
 	if market != "105" && market != "106" && market != "107" {
