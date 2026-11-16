@@ -18,6 +18,24 @@
 }
 .group-desc { font-size: var(--font-meta); color: var(--text-tertiary); }
 .group-block .cards { margin-bottom: 6px; }
+
+/* 详情抽屉：成分股（前十大重仓） */
+.hold-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 16px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.hold-title { font-size: var(--font-body); font-weight: 620; color: var(--text-secondary); }
+.hold-period { font-size: var(--font-meta); color: var(--text-tertiary); }
+.hold-note { font-size: var(--font-table); color: var(--text-tertiary); padding: 10px 0; }
+#dHoldings { margin-top: 6px; }
+#dHoldings .pct-bar {
+  display: inline-block; height: 6px; border-radius: 3px;
+  background: var(--accent, #3b82f6); vertical-align: middle;
+  margin-right: 6px; min-width: 2px;
+}
+#dHoldings td:nth-child(3), #dHoldings td:nth-child(4) { text-align: right; font-variant-numeric: tabular-nums; }
+#dHoldings th:nth-child(3), #dHoldings th:nth-child(4) { text-align: right; }
 </style>
 </head>
 <body>
@@ -82,6 +100,11 @@
   </div>
   <canvas id="dChart"></canvas>
   <div class="kpis" id="dKpis"></div>
+  <div class="hold-head">
+    <span class="hold-title">成分股（前十大重仓）</span>
+    <span class="hold-period" id="dHoldPeriod"></span>
+  </div>
+  <div id="dHoldings"><div class="hold-note">加载中 …</div></div>
 </div>
 
 <footer>数据来源：腾讯财经 / 新浪财经 / 东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
@@ -220,8 +243,45 @@ function openDetail(s) {
   ].map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   $("detail").classList.add("open");
   loadDetailChart();
+  loadHoldings(s);
 }
 function closeDetail() { $("detail").classList.remove("open"); STATE.detail = null; }
+
+// ---- 成分股（前十大重仓，/api/etf-holdings）----
+async function loadHoldings(s) {
+  const box = $("dHoldings"), period = $("dHoldPeriod");
+  period.textContent = "";
+  box.innerHTML = `<div class="hold-note">加载中 …</div>`;
+  if (!s || !s.code) {
+    box.innerHTML = `<div class="hold-note">暂无基金代码，无法查询成分股</div>`;
+    return;
+  }
+  try {
+    const d = await getJSON(`/api/etf-holdings?code=${encodeURIComponent(s.code)}`);
+    const items = d.items || [];
+    period.textContent = d.period || "";
+    if (!items.length) {
+      box.innerHTML = `<div class="hold-note">暂无持仓数据（非股票型基金可能无重仓股）</div>`;
+      return;
+    }
+    const maxPct = Math.max(...items.map(x => x.pct), 0.01);
+    box.innerHTML = `
+      <table>
+        <thead><tr><th>代码</th><th>名称</th><th>占净值比</th><th>持仓市值</th></tr></thead>
+        <tbody>${items.map(x => `
+          <tr>
+            <td>${x.code}</td>
+            <td>${x.name}</td>
+            <td><span class="pct-bar" style="width:${Math.max(2, Math.round(x.pct / maxPct * 48))}px"></span>${fmt(x.pct)}%</td>
+            <td>${fmtAmt(x.value * 1e4)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    period.textContent = "";
+    box.innerHTML = `<div class="hold-note">成分股暂不可用（东财限流期降级，恢复后自动显示）</div>`;
+  }
+}
 
 async function loadDetailChart() {
   const s = STATE.detail;

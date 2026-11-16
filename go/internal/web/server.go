@@ -31,6 +31,7 @@ type Server struct {
 	wd            *monitor.Watchdog
 	st            *store.Store
 	trade         *trading.Engine
+	acache        *analysisCache // 分析系统结论缓存
 	klineEM       source.Source // 东财 K 线（也是分时唯一源）
 	klineSina     source.Source // 新浪日 K（仅 A 股 sh/sz）
 	klineTencent  source.Source // 腾讯 K 线/分时（板块 pt 代码、美股指数）
@@ -61,7 +62,7 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 		}
 	}
 
-	s := &Server{cfg: cfg, wd: wd, st: st, trade: tradeEng, klineEM: kl, klineSina: klSina, klineTencent: klTencent, mux: http.NewServeMux()}
+	s := &Server{cfg: cfg, wd: wd, st: st, trade: tradeEng, acache: newAnalysisCache(), klineEM: kl, klineSina: klSina, klineTencent: klTencent, mux: http.NewServeMux()}
 
 	sub, _ := fs.Sub(staticFS, "static")
 	// 禁缓存：静态页内嵌于二进制，改版后必须让浏览器拿到最新文件
@@ -83,6 +84,7 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	s.mux.HandleFunc("GET /api/etfs", s.handleETFs)
 	s.mux.HandleFunc("GET /api/etf-quotes", s.handleETFQuotes)
 	s.mux.HandleFunc("GET /api/etf-groups", s.handleETFGroups)
+	s.mux.HandleFunc("GET /api/etf-holdings", s.handleETFHoldings)
 	s.mux.HandleFunc("GET /api/us/overview", s.handleUSOverview)
 	s.mux.HandleFunc("GET /api/us/stocks", s.handleUSStocks)
 	s.mux.HandleFunc("GET /api/ndx", s.handleNDX)
@@ -108,6 +110,10 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 		s.mux.HandleFunc("POST /api/trade/backtest", s.handleTradeBacktest)
 		s.mux.HandleFunc("GET /api/trade/strategies", s.handleTradeStrategies)
 	}
+
+	// 分析系统 API（不依赖交易开关）
+	s.mux.HandleFunc("GET /api/analysis", s.handleAnalysis)
+	s.mux.HandleFunc("GET /api/analysis/watchlist", s.handleAnalysisWatchlist)
 	return s, nil
 }
 

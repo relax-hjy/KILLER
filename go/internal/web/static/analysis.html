@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KILLER · 分析系统</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/market.css">
+<style>
+  .adv-badge { display: inline-block; padding: 2px 10px; border-radius: var(--radius-sm); font-size: var(--font-meta); font-weight: 600; border: 1px solid transparent; }
+  .adv-buy   { background: var(--danger-subtle);  color: var(--up);    border-color: rgba(217,107,114,.24); }
+  .adv-hold  { background: rgba(214,168,95,.11);  color: var(--warning); border-color: rgba(214,168,95,.24); }
+  .adv-sell  { background: var(--success-subtle); color: var(--down);  border-color: rgba(101,185,143,.24); }
+
+  /* 综合研判头 */
+  .asm-head { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 16px; border-bottom: 1px solid var(--border-subtle); }
+  .asm-name { font-family: var(--font-display); font-size: 18px; font-weight: 640; letter-spacing: -0.02em; }
+  .asm-name .code { font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+  .asm-price { font-family: var(--font-display); font-size: 24px; font-weight: 620; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .asm-score-box { display: flex; align-items: baseline; gap: 6px; }
+  .asm-score-box .num { font-family: var(--font-display); font-size: 34px; font-weight: 660; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .asm-score-box .den { font-size: 12px; color: var(--muted); }
+  .asm-summary { width: 100%; font-size: var(--font-body); color: var(--text-secondary); line-height: 1.7; }
+
+  /* 参考位 KPI */
+  .lvl-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); }
+  .lvl-kpis .kpi { background: var(--bg-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 10px 12px; }
+  .lvl-kpis .k { font-size: var(--font-meta); color: var(--text-tertiary); }
+  .lvl-kpis .v { font-family: var(--font-display); font-size: 17px; font-weight: 620; letter-spacing: -0.02em; margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+  /* 分析系统卡片 */
+  .fd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px,1fr)); gap: 12px; padding: 16px; }
+  .fd-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 14px 16px; }
+  .fd-card:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+  .fd-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .fd-title { font-size: var(--font-section); font-weight: 600; color: var(--text-primary); }
+  .fd-scoreline { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .fd-val { font-family: var(--font-display); font-size: 16px; font-weight: 640; font-variant-numeric: tabular-nums; min-width: 44px; }
+  .fd-bar { position: relative; flex: 1; height: 8px; background: var(--bg-subtle); border-radius: 4px; overflow: hidden; }
+  .fd-bar::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--border-default); z-index: 1; }
+  .fd-fill { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+  .fd-detail { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-bottom: 6px; line-height: 1.5; overflow-wrap: break-word; }
+  .fd-reason { font-size: var(--font-table); color: var(--text-secondary); line-height: 1.6; }
+
+  .sec-title .hint { font-size: var(--font-meta); color: var(--text-tertiary); font-weight: 400; }
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .toolbar .note { font-size: var(--font-meta); color: var(--text-tertiary); }
+  .toolbar .btn { margin-left: auto; }
+  .wl-score { font-weight: 620; font-variant-numeric: tabular-nums; }
+  tbody tr.sel { background: var(--bg-selected); }
+  tbody tr.sel td { color: var(--text-primary); }
+</style></head>
+<body>
+<header>
+  <h1>KILLER<span class="en">分析系统</span></h1>
+  <nav></nav>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <!-- 观察列表 -->
+  <section>
+    <h2 class="sec-title">A股科技股观察列表 <span class="hint">五个分析系统加权研判 · 列表来自 config.yaml analysis.watchlist</span></h2>
+    <div class="toolbar">
+      <span class="note" id="wlMeta">加载中 …</span>
+      <button class="btn" id="btnRefresh">刷新</button>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr>
+          <th>名称</th><th>代码</th><th class="num">现价</th><th class="num">涨跌幅</th>
+          <th class="num">综合评分</th><th>操作建议</th><th class="num">支撑位</th><th class="num">压力位</th><th class="num">止损参考</th>
+        </tr></thead>
+        <tbody id="wlBody"><tr><td colspan="9" class="loading">分析生成中（首次约 2-5 秒）…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 综合研判详情 -->
+  <section style="margin-top:20px">
+    <h2 class="sec-title">综合研判 <span class="hint">点击上表任意一行切换标的</span></h2>
+    <div class="panel" id="asmPanel">
+      <div class="empty" style="padding:28px">等待选择标的</div>
+    </div>
+  </section>
+</main>
+
+<footer>数据来源：新浪财经 / 东方财富 / 腾讯财经（免费公开接口）· 分析结论由技术指标模型自动生成，仅供学习研究，不构成投资建议</footer>
+
+<script src="/common.js"></script>
+<script>
+"use strict";
+let wlItems = [];      // 完整分析结论（含 findings）
+let selIdx = -1;       // 当前选中
+
+function advClass(advice) {
+  if (advice.includes("买入") && !advice.includes("暂缓")) return "adv-buy";
+  if (advice === "观望，回踩支撑再介入") return "adv-hold";
+  return "adv-sell";
+}
+function scoreColor(v) {
+  if (v >= 65) return "var(--up)";
+  if (v >= 50) return "var(--warning)";
+  return "var(--down)";
+}
+
+/* ---------- 观察列表 ---------- */
+async function loadWatchlist() {
+  $("btnRefresh").disabled = true;
+  $("wlMeta").textContent = "分析生成中（首次约 2-5 秒）…";
+  try {
+    const r = await getJSON("/api/analysis/watchlist");
+    wlItems = r.items || [];
+    renderWatchlist(r);
+    if (selIdx < 0 && wlItems.length > 0) selectItem(0);
+    else if (selIdx >= 0 && selIdx < wlItems.length) renderDetail();
+  } catch (e) {
+    $("wlBody").innerHTML = `<tr><td colspan="9" class="empty">加载失败：${e.message}</td></tr>`;
+    $("wlMeta").textContent = "加载失败";
+  } finally {
+    $("btnRefresh").disabled = false;
+  }
+}
+
+function renderWatchlist(r) {
+  const failed = r.failed || [];
+  const t = new Date(r.generated_at).toLocaleTimeString("zh-CN", { hour12: false });
+  $("wlMeta").textContent = `共 ${wlItems.length} 只 · 生成于 ${t} · 结果 90 秒内缓存` +
+    (failed.length ? ` · ${failed.length} 只失败：${failed.map(f => f.name).join("、")}` : "");
+  $("wlBody").innerHTML = wlItems.map((a, i) => `<tr data-i="${i}" class="${i === selIdx ? "sel" : ""}" style="cursor:pointer">
+    <td>${a.name}</td>
+    <td style="color:var(--muted);font-family:var(--font-mono)">${a.code}</td>
+    <td class="num">${fmt(a.price)}</td>
+    <td class="num ${cls(a.pct)}">${pctStr(a.pct)}</td>
+    <td class="num wl-score" style="color:${scoreColor(a.score)}">${a.score.toFixed(1)}</td>
+    <td><span class="adv-badge ${advClass(a.advice)}">${a.advice}</span></td>
+    <td class="num">${fmt(a.support)}</td>
+    <td class="num">${fmt(a.resistance)}</td>
+    <td class="num">${fmt(a.stop_loss)}</td>
+  </tr>`).join("") || `<tr><td colspan="9" class="empty">观察列表为空（检查 config.yaml analysis.watchlist）</td></tr>`;
+  document.querySelectorAll("#wlBody tr[data-i]").forEach(tr => {
+    tr.onclick = () => selectItem(parseInt(tr.dataset.i, 10));
+  });
+}
+
+function selectItem(i) {
+  selIdx = i;
+  document.querySelectorAll("#wlBody tr[data-i]").forEach(tr =>
+    tr.classList.toggle("sel", parseInt(tr.dataset.i, 10) === i));
+  renderDetail();
+}
+
+/* ---------- 综合研判详情 ---------- */
+function renderDetail() {
+  const a = wlItems[selIdx];
+  if (!a) { $("asmPanel").innerHTML = `<div class="empty" style="padding:28px">等待选择标的</div>`; return; }
+  const sc = scoreColor(a.score);
+  const kpis = [
+    ["支撑位（20日低）", fmt(a.support)],
+    ["压力位（60日高）", fmt(a.resistance)],
+    ["止损参考", fmt(a.stop_loss)],
+    ["分析参考价", fmt(a.price)],
+    ["涨跌幅", pctStr(a.pct)],
+    ["日K样本", `${a.kline_count} 根 · ${a.kline_date}`],
+  ];
+  $("asmPanel").innerHTML = `
+    <div class="asm-head">
+      <span class="asm-name">${a.name}<span class="code">${a.code}</span></span>
+      <span class="asm-price ${cls(a.pct)}">${fmt(a.price)}</span>
+      <span class="${cls(a.pct)}" style="font-variant-numeric:tabular-nums">${pctStr(a.pct)}</span>
+      <span class="asm-score-box"><span class="num" style="color:${sc}">${a.score.toFixed(1)}</span><span class="den">/ 100 综合评分</span></span>
+      <span class="adv-badge ${advClass(a.advice)}" style="font-size:13px;padding:4px 14px">${a.advice}</span>
+      <div class="asm-summary">${a.summary}</div>
+    </div>
+    <div class="lvl-kpis">${kpis.map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}</div>
+    <div class="fd-grid">${(a.findings || []).map(fdCard).join("")}</div>`;
+}
+
+function fdCard(f) {
+  const color = f.score >= 20 ? "var(--up)" : (f.score <= -20 ? "var(--down)" : "var(--text-tertiary)");
+  const w = Math.abs(f.score) / 2; // 满宽 100 → 半宽 50%
+  const fill = f.score >= 0
+    ? `left:50%;width:${w}%;background:${color}`
+    : `right:50%;width:${w}%;background:${color}`;
+  const vClass = f.verdict === "偏多" ? "adv-buy" : (f.verdict === "偏空" ? "adv-sell" : "adv-hold");
+  return `<div class="fd-card">
+    <div class="fd-head"><span class="fd-title">${f.title}</span><span class="adv-badge ${vClass}">${f.verdict}</span></div>
+    <div class="fd-scoreline">
+      <span class="fd-val" style="color:${color}">${f.score > 0 ? "+" : ""}${f.score.toFixed(0)}</span>
+      <div class="fd-bar"><div class="fd-fill" style="${fill}"></div></div>
+    </div>
+    <div class="fd-detail">${f.detail}</div>
+    <div class="fd-reason">${f.reason}</div>
+  </div>`;
+}
+
+$("btnRefresh").onclick = loadWatchlist;
+
+/* ---------- 初始化 ---------- */
+renderNav(NAV, "/analysis.html");
+startClock();
+loadWatchlist();
+</script>
+</body>
+</html>

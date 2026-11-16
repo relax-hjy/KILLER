@@ -42,12 +42,17 @@ type MonitoringConfig struct {
 
 // TradingConfig 模拟交易系统配置。
 type TradingConfig struct {
-	DataDir      string  `yaml:"data_dir"`      // 交易数据持久化目录（默认 D:\CloudDriver\EVO\killer）
-	InitialCash  float64 `yaml:"initial_cash"`  // 初始资金
+	DataDir        string  `yaml:"data_dir"`        // 交易数据持久化目录（默认 D:\CloudDriver\EVO\killer）
+	InitialCash    float64 `yaml:"initial_cash"`    // 初始资金
 	CommissionRate float64 `yaml:"commission_rate"` // 佣金费率（双边，如 0.00025）
-	MinCommission float64 `yaml:"min_commission"`  // 最低佣金（元）
-	StampTaxRate  float64 `yaml:"stamp_tax_rate"`  // 印花税（仅卖出，如 0.0005）
-	Enabled      bool    `yaml:"enabled"`        // 是否启用交易系统
+	MinCommission  float64 `yaml:"min_commission"`  // 最低佣金（元）
+	StampTaxRate   float64 `yaml:"stamp_tax_rate"`  // 印花税（仅卖出，如 0.0005）
+	Enabled        bool    `yaml:"enabled"`         // 是否启用交易系统
+}
+
+// AnalysisConfig 分析系统配置。
+type AnalysisConfig struct {
+	Watchlist []Index `yaml:"watchlist"` // 分析观察列表（分析页展示的标的，先聚焦 A 股科技股）
 }
 
 // Config 是顶层配置。
@@ -69,6 +74,7 @@ type Config struct {
 	Globals    []Index          `yaml:"globals"`
 	Monitoring MonitoringConfig `yaml:"monitoring"`
 	Trading    TradingConfig    `yaml:"trading"`
+	Analysis   AnalysisConfig   `yaml:"analysis"` // 分析系统（多维度研判 + 操作建议）
 	Logging    struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`
@@ -168,6 +174,18 @@ func Default() *Config {
 		StampTaxRate:   0.0005,
 		Enabled:        true,
 	}
+	c.Analysis = AnalysisConfig{Watchlist: []Index{
+		{SecID: "1.688981", Name: "中芯国际"},
+		{SecID: "1.688256", Name: "寒武纪"},
+		{SecID: "1.688041", Name: "海光信息"},
+		{SecID: "0.002371", Name: "北方华创"},
+		{SecID: "0.300308", Name: "中际旭创"},
+		{SecID: "0.300502", Name: "新易盛"},
+		{SecID: "1.601138", Name: "工业富联"},
+		{SecID: "0.002463", Name: "沪电股份"},
+		{SecID: "0.002475", Name: "立讯精密"},
+		{SecID: "1.688008", Name: "澜起科技"},
+	}}
 	c.Logging.Level = "INFO"
 	return c
 }

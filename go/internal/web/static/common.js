@@ -60,6 +60,7 @@ const NAV = [
   { href: "/stocks.html", label: "A股个股" },
   { href: "/etfs.html", label: "A股 ETF" },
   { href: "/us.html", label: "美股" }, // 2026-11-13 起含板块 + 个股（成交活跃榜 / 纳指100 成分 tab 切换）
+  { href: "/analysis.html", label: "分析" },
   { href: "/trading.html", label: "交易" },
   { href: "/datasource.html", label: "数据源" },
 ];

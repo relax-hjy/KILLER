@@ -77,6 +77,13 @@ cmd/killer/main.go ── 装配
 - `Board`：A股板块（名称/点位/涨跌幅/板块内涨跌家数；新浪兜底时家数为 -1）
 - `Stock`：个股行情通用结构（A股/美股，含成交额/换手/PE/PB/市值）
 - `WatchStock`：自选个股（含独立阈值）
+- `Holding`：基金持仓明细行（序号/代码/名称/占净值比%/持股数万股/市值万元，2026-11-16 新增）
+
+### 内存结构（analysis 包，2026-11-16 新增）
+- `Finding`：单个分析系统结论（analyzer/title/score -100~+100/verdict/detail/reason）
+- `Assessment`：综合研判结论（score 0-100、advice 五档、summary、support/resistance/stop_loss、findings[5]、KlineCount/KlineDate）
+- 合成权重：趋势 0.30 / 动量 0.25 / 量价 0.20 / 支撑压力 0.15 / 波动风险 0.10；评分→建议五档：≥80 可积极买入、≥65 可以买入、≥50 观望回踩、≥35 偏弱暂缓、其余回避
+- 关键位：支撑=近 20 日最低，压力=近 60 日最高，止损=支撑-1×ATR14 且不深于现价 -8%；现价 < 支撑判破位（-50）
 
 ## API 设计
 
@@ -104,10 +111,17 @@ cmd/killer/main.go ── 装配
 | GET | /api/etfs?page=&sort=&asc= | A股 ETF 分页（东财 clist 独占，每页50，缓存 15s） |
 | GET | /api/etf-quotes | 监控 ETF 最新行情（按 config.etfs 顺序，看门狗巡检内存态） |
 | GET | /api/etf-groups | 市场 ETF 组合（按 config.etf_groups 分组，汇总 secid 去重后一次腾讯批量拉行情再分组返回，缓存 10s；行情失败降级返回组结构） |
+| GET | /api/etf-holdings?code= | ETF 前十大重仓（东财天天基金 F10 jjcc，最新披露期；code 兼容 6 位基金代码与 secid 形态；缓存 6h 防限流；2026-11-16 新增） |
 | GET | /api/us/overview | 美股三大指数 + SPDR 11 板块一次批量（缓存 10s） |
 | GET | /api/us/stocks?page=&sort=&market= | 美股活跃榜分页（东财独占） |
 | GET | /api/ndx | 纳指100 成分+批量行情（成分缓存 6h，行情 10s；2026-11-13 起由 /us.html 个股区「纳指100 成分」tab 调用，不再有独立页面） |
 | GET/POST/DELETE | /api/watch[?secid=] | 自选个股增删查（附最新行情） |
+
+### 分析模块（2026-11-16 新增）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /api/analysis?secid=&name= | 单标的完整分析：5 项 Finding + 综合评分/操作建议/支撑/压力/止损（日K 90s 缓存，实时价尽力而为、缺失回退最新收盘） |
+| GET | /api/analysis/watchlist | config `analysis.watchlist` 全量分析（并发拉取，保持配置顺序；单项失败进 `failed` 数组不影响其余） |
 
 ### 数据源治理模块（2026-11-12 新增）
 | 方法 | 路径 | 说明 |
@@ -123,14 +137,16 @@ cmd/killer/main.go ── 装配
 
 **能力矩阵**（实测边界）：东财 = 除成分表外全部（2026-11-12 实测 push2 连接失败，降为兜底）；新浪 = 指数行情/日K/板块/个股列表/批量行情（无分钟分时、无美股列表、无 100.* 指数、无板块成分股、无 ETF 列表）；腾讯 = 批量行情+板块+分时/K线（列表/行情/成分股/日K/分时，A股/美股/ETF/100.* 指数通吃）；yfiua = 仅纳指100成分。
 
-前端页面：`/`（大盘）、`/boards.html`、`/stocks.html`、`/etfs.html`（ETF 看板）、`/us.html`（美股全景，2026-11-13 起合并原 `/ndx.html`：三大指数卡片 + SPDR 板块 + 个股区双 tab「成交活跃榜 / 纳指100 成分」共用详情抽屉，`?tab=ndx` 直达成分 tab）、`/trading.html`、`/datasource.html`（数据源看板），统一导航 market.css + common.js。原 `/ndx.html` 已删除（旧链接 404），导航不再单列「纳指100」。
+前端页面：`/`（大盘）、`/boards.html`、`/stocks.html`、`/etfs.html`（ETF 看板）、`/us.html`（美股全景，2026-11-13 起合并原 `/ndx.html`：三大指数卡片 + SPDR 板块 + 个股区双 tab「成交活跃榜 / 纳指100 成分」共用详情抽屉，`?tab=ndx` 直达成分 tab）、`/analysis.html`（分析系统，2026-11-16 新增：科技股观察列表 + 综合研判详情）、`/trading.html`、`/datasource.html`（数据源看板），统一导航 market.css + common.js。原 `/ndx.html` 已删除（旧链接 404），导航不再单列「纳指100」。
 
 ## 模块依赖
 
 ```
 cmd/killer → config, monitor, store, web
 monitor     → config, model, source, store
-web         → cache, config, model, monitor(只读), source, store
+web         → analysis, cache, config, model, monitor(只读), source, store, trading
+trading     → model, source（模拟交易引擎：订单/持仓/策略信号/回测）
+analysis    → model（分析系统：5 分析器 + 加权合成，无外部依赖）
 source      → model（东财 + 新浪 + 腾讯三源 + NDX 成分外部源 + 路由/探测治理）
 store       → model（含 setting 表：路由持久化）
 cache       → （无依赖，TTL 缓存，保护上游接口）
