@@ -50,8 +50,19 @@ func TestAssessUptrend(t *testing.T) {
 		t.Errorf("上升趋势综合评分应 >60，实际 %.1f（advice=%s）", a.Score, a.Advice)
 	}
 	trend := a.Findings[0]
-	if trend.Analyzer != NameTrend || trend.Score < 80 {
+	// 120 根样本没有年线/周线项，趋势满额是 75（30+18+17+10）
+	if trend.Analyzer != NameTrend || trend.Score < 70 {
 		t.Errorf("趋势分析应强偏多，实际 score=%.1f reason=%s", trend.Score, trend.Reason)
+	}
+	// 回归：样本不足 250 根时年线项必须缺席（不能把全量均值当年线扣分）
+	if !strings.Contains(trend.Reason, "年线缺失") {
+		t.Errorf("样本不足应标注年线缺失，实际 reason=%s", trend.Reason)
+	}
+	if a.Confidence >= 100 || a.Confidence < 60 {
+		t.Errorf("120 根样本的置信度应在 60~100，实际 %.1f", a.Confidence)
+	}
+	if a.Atr <= 0 {
+		t.Errorf("应返回 ATR 供按买入价重算止损，实际 %.2f", a.Atr)
 	}
 	if a.Support <= 0 || a.Resistance <= 0 || a.Support > a.Resistance {
 		t.Errorf("支撑/压力异常: support=%.2f resistance=%.2f", a.Support, a.Resistance)
@@ -147,15 +158,46 @@ func TestSupportBreakdown(t *testing.T) {
 	}
 }
 
-// TestStopLossClamp 止损不深于现价 -8%。
+// TestStopLossClamp 止损波动率口径：支撑-1×ATR 与基准价-2.5×ATR 取高，且不深于 -15%。
 func TestStopLossClamp(t *testing.T) {
-	lv := levels{support: 10, atr: 5} // 支撑-ATR = 5，远深于 88
-	if sl := stopLossOf(100, lv); sl != 92 {
-		t.Errorf("止损应被钳制在 92（-8%%），实际 %.2f", sl)
+	near := func(got, want float64) bool {
+		d := got - want
+		return d < 0.01 && d > -0.01
 	}
-	lv = levels{support: 95, atr: 1} // 94 > 92，用支撑-ATR
-	if sl := stopLossOf(100, lv); sl != 94 {
-		t.Errorf("止损应为支撑-ATR=94，实际 %.2f", sl)
+	lv := levels{support: 10, atr: 5} // 支撑-ATR=5、基准-2.5ATR=87.5 → 取 87.5，未触及 -15% 底
+	if sl := stopLossOf(100, lv); !near(sl, 87.5) {
+		t.Errorf("止损应取基准价-2.5×ATR=87.5，实际 %.2f", sl)
+	}
+	lv = levels{support: 95, atr: 1} // 94 < 97.5 → 取 97.5（波动小，止损跟得紧）
+	if sl := stopLossOf(100, lv); !near(sl, 97.5) {
+		t.Errorf("止损应取基准价-2.5×ATR=97.5，实际 %.2f", sl)
+	}
+	lv = levels{support: 50, atr: 10} // 两者都深于 -15%（85）→ 钳制在 85
+	if sl := stopLossOf(100, lv); !near(sl, 85) {
+		t.Errorf("止损不应深于 -15%%，实际 %.2f", sl)
+	}
+	lv = levels{support: 95, atr: 0} // 无 ATR 退回固定 -8%
+	if sl := stopLossOf(100, lv); !near(sl, 92) {
+		t.Errorf("无 ATR 应退回 -8%%=92，实际 %.2f", sl)
+	}
+}
+
+// TestStopLossAt 限价等回踩的计划，止损必须锚定买入价而非现价——
+// 否则用现价算出的止损高于回踩买入价，一成交就贴损。
+func TestStopLossAt(t *testing.T) {
+	a := &Assessment{Support: 11.0, Atr: 0.15}
+	// 现价口径（12.26）：max(10.85, 11.885) ≈ 11.89 —— 高于回踩买入价 11.44，成交即贴损
+	nowStop := round2(stopLossOf(12.26, levels{support: a.Support, atr: a.Atr}))
+	if nowStop < 11.44 {
+		t.Fatalf("本用例想演示现价口径止损高于买入价，实际 %.2f", nowStop)
+	}
+	// 买入价口径（11.44）：max(10.85, 11.065) ≈ 11.07，比买入价低 3%+，有呼吸空间
+	entryStop := a.StopLossAt(11.44)
+	if entryStop >= 11.44 {
+		t.Errorf("止损必须低于买入价: %.2f", entryStop)
+	}
+	if entryStop >= nowStop {
+		t.Errorf("买入价口径止损（%.2f）应低于现价口径（%.2f）", entryStop, nowStop)
 	}
 }
 
@@ -182,6 +224,30 @@ func TestTrendYearLine(t *testing.T) {
 	if above.Score-below.Score != 30 {
 		t.Errorf("年线维度分差应为 30（+15 vs -15），实际 %.1f（above=%.1f below=%.1f）",
 			above.Score-below.Score, above.Score, below.Score)
+	}
+}
+
+// TestFindingSubs 子项得分必须齐全且合计等于结论分（前端"分析详情"靠它解释分数从哪来）。
+func TestFindingSubs(t *testing.T) {
+	a, err := Assess("1.600519", "测试股", genKlines(300, 0.3, 1e6, 1), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range a.Findings {
+		if len(f.Subs) == 0 {
+			t.Errorf("%s 缺少子项得分", f.Analyzer)
+			continue
+		}
+		sum := 0.0
+		for _, s := range f.Subs {
+			sum += s.Score
+			if s.Name == "" {
+				t.Errorf("%s 子项缺名称: %+v", f.Analyzer, s)
+			}
+		}
+		if d := sum - f.Score; d > 0.01 || d < -0.01 {
+			t.Errorf("%s 子项合计 %.1f ≠ 结论分 %.1f", f.Analyzer, sum, f.Score)
+		}
 	}
 }
 

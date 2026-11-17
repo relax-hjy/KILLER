@@ -298,10 +298,11 @@ function renderAnalysis(a) {
     <div class="asm-summary">${a.summary}</div>
     <div class="asm-fd">${(a.findings || []).map(f => {
       const c = f.score >= 20 ? "var(--up)" : (f.score <= -20 ? "var(--down)" : "var(--text-tertiary)");
-      return `<div>
+      return `<div data-analyzer="${f.analyzer}" data-finding="${encodeURIComponent(JSON.stringify(f))}">
         <div class="t"><span>${f.title}</span><span>${f.verdict}</span></div>
         <div class="v" style="color:${c}">${f.score > 0 ? "+" : ""}${f.score.toFixed(0)}</div>
         <div class="r">${f.reason}</div>
+        <div class="fd-x-hint">点击看分析详情</div>
       </div>`;
     }).join("")}</div>`;
 }
@@ -392,6 +393,7 @@ startClock();
 loadWatch();
 loadGroups();
 loadETFs();
+bindFindingCards($("dAsm")); // 点分析器卡片展开"分析详情"
 setInterval(loadWatch, 10000);  // 监控卡片 10s 刷新（与大盘巡检节奏对齐）
 setInterval(loadGroups, 10000); // 市场组合卡片 10s 刷新
 setInterval(loadETFs, 30000);   // 全市场列表 30s 刷新

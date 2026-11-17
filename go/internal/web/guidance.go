@@ -24,6 +24,7 @@ const (
 	actAdd   = "加仓"
 	actCut   = "减仓"
 	actClear = "清仓"
+	actTake  = "止盈"
 	actBuy   = "买入"
 )
 
@@ -60,7 +61,7 @@ func cutQty(qty int64, price, mv, targetMV float64, lot int64) int64 {
 // guideHolding 给单只持仓定动作。
 // 优先级：已破止损 → 清仓；研判回避 → 清仓；市值超单票上限 → 减到上限（纪律优先，偏多也减）；
 // 研判偏多且还有买入预算 → 加仓，否则持有。
-func guideHolding(a *analysis.Assessment, qty int64, price, mv, total, singleCap, deployable float64, lot int64, commissionRate, minCommission float64) (action string, suggestQty int64, suggestPrice float64, reason string) {
+func guideHolding(a *analysis.Assessment, qty int64, price, avgCost, mv, total, singleCap, deployable float64, lot int64, commissionRate, minCommission float64) (action string, suggestQty int64, suggestPrice float64, reason string) {
 	if price <= 0 || qty <= 0 {
 		return actHold, 0, 0, "缺少行情，暂不给建议"
 	}
@@ -73,6 +74,12 @@ func guideHolding(a *analysis.Assessment, qty int64, price, mv, total, singleCap
 	}
 	if a.Advice == "回避" {
 		return actClear, qty, price, "研判「回避」，建议全部离场"
+	}
+	// 分批止盈：贴近压力位且有浮盈，先落袋一半，剩余守止损（不做一把梭的清仓建议）
+	if a.Resistance > 0 && price >= a.Resistance*0.98 && price > avgCost {
+		if n := halfLot(qty, lot); n > 0 {
+			return actTake, n, price, "现价贴近压力位 " + f1(a.Resistance) + "，先止盈一半落袋，剩余守止损等突破"
+		}
 	}
 	if mv > singleCap {
 		if n := cutQty(qty, price, mv, singleCap, lot); n > 0 {
@@ -94,6 +101,18 @@ func guideHolding(a *analysis.Assessment, qty int64, price, mv, total, singleCap
 	return actHold, 0, 0, "研判偏多，但买入预算不足一手，先持有"
 }
 
+// halfLot 止盈数量：减半后按整手向下取整（不足一手不减，留着守趋势）。
+func halfLot(qty, lot int64) int64 {
+	if lot <= 0 {
+		lot = 100
+	}
+	n := qty / 2 / lot * lot
+	if n < lot {
+		return 0
+	}
+	return n
+}
+
 // buyPrice 建议买入价：不追高，挂到支撑位附近（支撑位上浮 2%），现价更低则按现价。
 func buyPrice(price, support float64) float64 {
 	px := price
@@ -104,6 +123,88 @@ func buyPrice(price, support float64) float64 {
 		}
 	}
 	return math.Round(px*100) / 100
+}
+
+// planStep 应对预案的一步：触发条件 → 执行动作（白话条件句，面向不熟悉技术指标的用户）。
+type planStep struct {
+	If   string `json:"if"`
+	Then string `json:"then"`
+}
+
+// planHolding 生成持仓应对预案（如果…就…），按"当前已触发的状态优先 → 关键价位 → 环境变化"排序。
+// 止损一律锚定买入价（StopLossAt(avgCost)），与盯盘告警同口径；
+// 只给条件句不给新动作——预案是把 guideHolding 的决策依据摊开写成人话，不引入第二套逻辑。
+func planHolding(a *analysis.Assessment, qty int64, avgCost, price float64, action string, suggestQty int64, lot int64) []planStep {
+	steps := make([]planStep, 0, 5)
+	stop := a.StopLossAt(avgCost)
+	if stop > 0 {
+		if price > 0 && price < stop {
+			steps = append(steps, planStep{
+				If:   "现价 " + f1(price) + " 已跌破止损位 " + f1(stop),
+				Then: "立即清仓离场，按纪律执行，不等回本",
+			})
+		} else if avgCost > 0 {
+			risk := (stop - avgCost) / avgCost * 100
+			steps = append(steps, planStep{
+				If:   "跌破止损位 " + f1(stop) + "（较买入价约 " + f1(risk) + "%）",
+				Then: "清仓止损，不补仓不摊薄",
+			})
+		} else {
+			steps = append(steps, planStep{
+				If:   "跌破止损位 " + f1(stop),
+				Then: "清仓止损，不补仓不摊薄",
+			})
+		}
+	}
+	if a.Advice == "回避" {
+		steps = append(steps, planStep{
+			If:   "研判维持「回避」",
+			Then: "有反弹就全部离场，不等回本",
+		})
+	}
+	if a.Resistance > 0 && qty > 0 {
+		if n := halfLot(qty, lot); n > 0 {
+			if price > avgCost && price >= a.Resistance*0.98 {
+				steps = append(steps, planStep{
+					If:   "现价已贴近压力位 " + f1(a.Resistance),
+					Then: "止盈一半（" + strconv.FormatInt(n, 10) + " 股）先落袋，剩余仓位守止损等突破",
+				})
+			} else {
+				steps = append(steps, planStep{
+					If:   "涨到压力位 " + f1(a.Resistance),
+					Then: "止盈一半（" + strconv.FormatInt(n, 10) + " 股）先落袋，剩余守止损",
+				})
+			}
+		}
+	}
+	if a.Support > 0 {
+		switch {
+		case action == actAdd && suggestQty > 0:
+			steps = append(steps, planStep{
+				If:   "回踩支撑位 " + f1(a.Support) + " 附近企稳（不破）",
+				Then: "可加仓 " + strconv.FormatInt(suggestQty, 10) + " 股，加仓部分同样守止损",
+			})
+		case price > 0 && price < a.Support:
+			steps = append(steps, planStep{
+				If:   "跌破支撑位 " + f1(a.Support) + " 但未到止损",
+				Then: "暂停加仓，观察能否收回；再破止损位直接走",
+			})
+		default:
+			steps = append(steps, planStep{
+				If:   "回踩支撑位 " + f1(a.Support) + " 附近企稳",
+				Then: "才是加仓位置，冲高时不追",
+			})
+		}
+	}
+	weak := "大盘环境转弱势（指数跌破 MA20、板块普跌）"
+	if a.Regime == "弱势" {
+		weak = "大盘环境维持弱势"
+	}
+	steps = append(steps, planStep{
+		If:   weak,
+		Then: "暂停加仓，浮盈持仓跌破止损优先离场——弱势市高分也可能是陷阱",
+	})
+	return steps
 }
 
 // f1 保留 1 位小数拼字符串（拼 reason 用）。
@@ -131,6 +232,7 @@ type guidanceHolding struct {
 	Resistance  float64 `json:"resistance"`
 	StopLoss    float64 `json:"stop_loss"`
 	Reason      string  `json:"reason"`
+	Plan        []planStep `json:"plan"` // 应对预案：如果…就…（止损/止盈/加仓/环境）
 }
 
 type guidanceCandidate struct {
@@ -216,13 +318,20 @@ func (s *Server) handleTradeGuidance(w http.ResponseWriter, r *http.Request) {
 			holdings = append(holdings, h)
 			continue
 		}
+		a = gatedCopy(a) // 闸门在副本上改，别污染共享缓存
+		s.applyQualityGate(ctx, a) // 持仓决策要过财报闸门（指导只涉少量标的，拉 F10 无压力）
 		h.Score, h.Advice = a.Score, a.Advice
 		h.Pct, h.Support, h.Resistance, h.StopLoss = a.Pct, a.Support, a.Resistance, a.StopLoss
 		h.Action, h.SuggestQty, h.SuggestPrice, h.Reason = guideHolding(
-			a, p.Quantity, p.LastPrice, p.MarketValue, total, singleCap, deployable, lot,
+			a, p.Quantity, p.LastPrice, p.AvgCost, p.MarketValue, total, singleCap, deployable, lot,
 			cfg.CommissionRate, cfg.MinCommission)
+		h.Plan = planHolding(a, p.Quantity, p.AvgCost, p.LastPrice, h.Action, h.SuggestQty, lot)
 		if h.Action == actAdd {
+			h.StopLoss = a.StopLossAt(h.SuggestPrice) // 加仓计划的止损锚定建议买入价
 			deployable -= h.SuggestPrice * float64(h.SuggestQty) // 加仓占用的预算不再给候选
+		}
+		if h.Action == actTake {
+			h.StopLoss = a.StopLossAt(h.AvgCost) // 止盈后剩余仓位守成本口径的止损
 		}
 		if h.WeightPct > cfg.SinglePositionPct {
 			risk.Notes = append(risk.Notes, h.Name+" 单票仓位 "+f1(h.WeightPct)+"%，已超上限 "+f1(cfg.SinglePositionPct)+"%")
@@ -317,6 +426,11 @@ func (s *Server) guideCandidates(ctx context.Context, group string, n int, singl
 		if aErr != nil {
 			continue
 		}
+		a = gatedCopy(a) // 闸门在副本上改，别污染共享缓存
+		s.applyQualityGate(ctx, a) // 候选买入要过财报闸门
+		if a.Advice != "可以买入" && a.Advice != "观望，回踩支撑再介入" {
+			continue // 闸门降档后不再建议买入
+		}
 		px := buyPrice(q.Price, a.Support)
 		qty := buyQty(math.Min(deployable, singleCap), px, commissionRate, minCommission, lot)
 		if qty < lot {
@@ -328,12 +442,16 @@ func (s *Server) guideCandidates(ctx context.Context, group string, n int, singl
 			Score: a.Score, Advice: a.Advice, SuggestPrice: px, SuggestQty: qty, Amount: amount,
 			Support: a.Support, Resistance: a.Resistance, StopLoss: a.StopLoss,
 		}
+		g.StopLoss = a.StopLossAt(px) // 计划价口径：用现价算的止损会高于回踩买入价
 		g.Reason = "评分 " + f1(a.Score) + " · " + a.Advice
 		if a.Support > 0 && q.Price > a.Support*1.05 {
 			g.Reason += "；现价高于支撑 5%+，等回踩到 " + f1(px) + " 再接"
 		}
-		if a.StopLoss > 0 {
-			g.Reason += "；止损 " + f1(a.StopLoss)
+		if g.StopLoss > 0 {
+			g.Reason += "；止损 " + f1(g.StopLoss)
+		}
+		if a.Resistance > 0 {
+			g.Reason += "；目标位 " + f1(a.Resistance) + "，到位先止盈一半"
 		}
 		out = append(out, g)
 		deployable -= amount

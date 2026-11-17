@@ -512,6 +512,22 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--warning);
   border-color: rgba(214, 168, 95, 0.24);
 }
+/* 持仓预案类告警：止损红、止盈绿、大盘转弱灰（值列是浮盈亏%，不是涨跌幅） */
+.badge.position_stop {
+  background: var(--danger-subtle);
+  color: var(--up);
+  border-color: rgba(217, 107, 114, 0.24);
+}
+.badge.position_take {
+  background: var(--success-subtle);
+  color: var(--down);
+  border-color: rgba(101, 185, 143, 0.24);
+}
+.badge.regime_weak {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
 
 /* ---------- 板块热度条 ---------- */
 .heat {
@@ -621,3 +637,17 @@ tbody tr:last-child td { border-bottom: none; }
     animation-duration: 0.01ms !important;
   }
 }
+
+/* 分析器卡片展开的「分析详情」（科普 + 子项得分，见 common.js ANALYZER_GUIDE） */
+.fd-explain { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-subtle); font-size: var(--font-table); line-height: 1.7; color: var(--text-secondary); }
+.fd-x-sec { margin: 6px 0; }
+.fd-x-sec b { color: var(--text-primary); }
+.fd-x-table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: var(--font-meta); }
+.fd-x-table th, .fd-x-table td { padding: 5px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; vertical-align: top; }
+.fd-x-table th { color: var(--text-tertiary); font-weight: 520; }
+.fd-x-score { font-family: var(--font-display); font-weight: 640; white-space: nowrap; }
+.fd-x-term { color: var(--text-tertiary); font-size: var(--font-meta); line-height: 1.5; margin-top: 2px; }
+.fd-x-hint { margin-top: 8px; color: var(--text-disabled); font-size: var(--font-meta); }
+.fd-card, .asm-fd > div[data-analyzer] { cursor: pointer; }
+.fd-card.open, .asm-fd > div.open { border-color: var(--border-strong); }
+.fd-card.open .fd-x-hint, .asm-fd > div.open .fd-x-hint { display: none; }

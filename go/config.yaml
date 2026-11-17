@@ -10,7 +10,7 @@ datasource:
   fallback: sina             # 备用数据源（主源失败时自动切换）
 
 database:
-  path: market.db            # SQLite 文件路径（相对项目根目录）
+  path: "D:\\CloudDriver\\EVO\\killer\\market.db"   # SQLite 文件，与交易数据同放网盘同步目录（相对路径则相对启动目录）；WAL 模式，同时只能一台机器跑
 
 # --- 监控的大盘指数 ---
 indices:

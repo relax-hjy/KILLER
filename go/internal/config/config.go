@@ -106,7 +106,8 @@ func Default() *Config {
 	c.Server.Addr = ":8080"
 	c.Datasource.Primary = "eastmoney"
 	c.Datasource.Fallback = "sina"
-	c.Database.Path = "market.db"
+	// 与交易数据同放网盘同步目录：行情快照/告警/自选/分析日报都要跟着走，别散在启动目录
+	c.Database.Path = `D:\CloudDriver\EVO\killer\market.db`
 	c.Indices = []Index{
 		{SecID: "1.000001", Name: "上证指数"},
 		{SecID: "0.399001", Name: "深证成指"},

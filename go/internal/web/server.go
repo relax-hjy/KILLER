@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"killer/internal/config"
@@ -36,6 +37,11 @@ type Server struct {
 	klineSina     source.Source // 新浪日 K（仅 A 股 sh/sz）
 	klineTencent  source.Source // 腾讯 K 线/分时（板块 pt 代码、美股指数）
 	mux           *http.ServeMux
+
+	// 市场环境缓存：批量评估时并发问，互斥锁把请求合并成一次
+	regimeMu  sync.Mutex
+	regimeVal regimeResult
+	regimeAt  time.Time
 }
 
 // New 构建路由。
@@ -145,6 +151,7 @@ func initTrading(cfg *config.Config) (*trading.Engine, error) {
 // Serve 启动 HTTP 服务（阻塞）。
 func (s *Server) Serve() error {
 	s.startArchive()
+	s.startPositionWatch()
 	log.Printf("[Web] 面板已启动: http://localhost%s", s.cfg.Server.Addr)
 	return http.ListenAndServe(s.cfg.Server.Addr, s.mux)
 }

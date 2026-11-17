@@ -38,7 +38,7 @@
   </section>
 
   <section class="panel" style="margin-top:20px">
-    <h2>告警记录 <span class="hint">（涨跌幅 / 振幅阈值，含冷却）</span></h2>
+    <h2>告警记录 <span class="hint">（涨跌幅 / 振幅阈值 + 持仓止损止盈 / 大盘转弱，含冷却）</span></h2>
     <table>
       <thead><tr><th>时间</th><th>名称</th><th>类型</th><th>触发值</th><th>阈值</th><th>点位</th></tr></thead>
       <tbody id="alertBody"></tbody>
@@ -242,7 +242,8 @@ function drawChart() {
 /* ---------- 板块成分股抽屉已移除（首页不再展示板块监控） ---------- */
 
 /* ---------- 告警 ---------- */
-const TYPE_LABEL = { change_up: "涨幅超限", change_down: "跌幅超限", amplitude: "振幅超限" };
+const TYPE_LABEL = { change_up: "涨幅超限", change_down: "跌幅超限", amplitude: "振幅超限",
+  position_stop: "止损触发", position_take: "止盈到位", regime_weak: "大盘转弱" };
 function renderAlerts(list) {
   $("alertEmpty").style.display = list.length ? "none" : "block";
   $("alertBody").innerHTML = list.map(a => `
@@ -250,9 +251,9 @@ function renderAlerts(list) {
       <td class="num">${new Date(a.triggered_at).toLocaleString("zh-CN", {hour12:false})}</td>
       <td>${a.name}</td>
       <td><span class="badge ${a.type}">${TYPE_LABEL[a.type] || a.type}</span></td>
-      <td class="num ${a.type === 'change_down' ? 'down' : 'up'}">${pctStr(a.value)}</td>
+      <td class="num ${a.type === 'change_down' || a.type === 'position_stop' ? 'down' : (a.type === 'regime_weak' ? '' : 'up')}">${pctStr(a.value)}</td>
       <td class="num">${a.threshold.toFixed(2)}%</td>
-      <td class="num">${fmt(a.price)}</td>
+      <td class="num">${a.price > 0 ? fmt(a.price) : "—"}</td>
     </tr>`).join("");
 }
 

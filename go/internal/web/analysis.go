@@ -3,9 +3,13 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"math"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,9 +88,161 @@ func (s *Server) assess(ctx context.Context, secid, name string) (*analysis.Asse
 	if err != nil {
 		return nil, err
 	}
+	s.applyMarketGate(ctx, a) // 弱势环境把买入建议按成观望（评分不动）
 	s.acache.set(secid, a)
 	s.saveReport(a)
 	return a, nil
+}
+
+// ---- 市场环境与质量闸门（改建议不改评分）----
+
+// regimeResult 市场环境结论。
+type regimeResult struct {
+	Label  string  `json:"label"`  // 强势 / 中性 / 弱势
+	Reason string  `json:"reason"`
+	Score  float64 `json:"score"` // 0-100
+}
+
+// marketRegime 市场环境：配置内指数的 MA20/MA60 站上比例 + 配置板块的赚钱效应。
+// 批量评估时上百只同时问，这里用互斥锁 + 5 分钟缓存把请求合并掉。
+func (s *Server) marketRegime(ctx context.Context) regimeResult {
+	s.regimeMu.Lock()
+	defer s.regimeMu.Unlock()
+	if s.regimeVal.Label != "" && time.Since(s.regimeAt) < 5*time.Minute {
+		return s.regimeVal
+	}
+	r := s.calcRegime(ctx)
+	s.regimeVal, s.regimeAt = r, time.Now()
+	return r
+}
+
+func (s *Server) calcRegime(ctx context.Context) regimeResult {
+	idxOK, idxTotal := 0, 0
+	for _, it := range s.cfg.Indices {
+		klines, err := trading.LoadKlines(ctx, it.SecID, 60)
+		if err != nil || len(klines) < 20 {
+			continue
+		}
+		ma20 := 0.0
+		for _, k := range klines[len(klines)-20:] {
+			ma20 += k.Close
+		}
+		ma20 /= 20
+		idxTotal++
+		if klines[len(klines)-1].Close > ma20 {
+			idxOK++
+		}
+	}
+	boardUp, boardTotal := 0, 0
+	if quotes, err := source.FetchBoardQuotes(ctx, boardSecIDs(s.cfg.Boards)); err == nil {
+		for _, q := range quotes {
+			boardTotal++
+			if q.Pct > 0 {
+				boardUp++
+			}
+		}
+	}
+	r := regimeResult{}
+	parts := []string{}
+	if idxTotal > 0 {
+		r.Score += float64(idxOK) / float64(idxTotal) * 60
+		parts = append(parts, fmt.Sprintf("指数 %d/%d 站上MA20", idxOK, idxTotal))
+	}
+	if boardTotal > 0 {
+		r.Score += float64(boardUp) / float64(boardTotal) * 40
+		parts = append(parts, fmt.Sprintf("板块 %d/%d 上涨", boardUp, boardTotal))
+	}
+	r.Reason = strings.Join(parts, "，")
+	switch {
+	case r.Score >= 67:
+		r.Label = "强势"
+	case r.Score >= 40:
+		r.Label = "中性"
+	default:
+		r.Label = "弱势"
+	}
+	if idxTotal == 0 && boardTotal == 0 {
+		r.Label = "" // 环境不可用时不参与降档
+	}
+	return r
+}
+
+// boardSecIDs 取板块 secid 列表。
+func boardSecIDs(list []config.Index) []string {
+	out := make([]string, 0, len(list))
+	for _, b := range list {
+		out = append(out, b.SecID)
+	}
+	return out
+}
+
+// applyMarketGate 市场环境降档：弱势环境不放行新买入建议。
+// 回测证实这套评分是趋势跟随（动量市有效、弱势市反转），所以弱势要把"可以买入"按住。
+func (s *Server) applyMarketGate(ctx context.Context, a *analysis.Assessment) {
+	r := s.marketRegime(ctx)
+	if r.Label == "" {
+		return
+	}
+	a.Regime = r.Label
+	if r.Label == "弱势" {
+		if down := downgradeAdvice(a.Advice); down != a.Advice {
+			a.Notes = append(a.Notes, "市场环境弱势（"+r.Reason+"），建议降档为「"+down+"」")
+			a.Advice = down
+		}
+		return
+	}
+	if r.Label == "强势" {
+		a.Notes = append(a.Notes, "市场环境强势（"+r.Reason+"）")
+	}
+}
+
+// downgradeAdvice 建议降一档（买入类先按住，回避不再降）。
+func downgradeAdvice(advice string) string {
+	switch advice {
+	case "可积极买入":
+		return "可以买入"
+	case "可以买入":
+		return "观望，回踩支撑再介入"
+	case "观望，回踩支撑再介入":
+		return "偏弱，暂缓买入"
+	case "偏弱，暂缓买入":
+		return "回避"
+	}
+	return advice
+}
+
+// applyQualityGate F10 质量闸门：最近一期财报双恶化降一档，双高增给正注。
+// 只在单标的明细与交易指导里生效——批量评分不拉 F10（每只 3 个东财请求，100+ 只会撞限流）。
+// 必须传副本（见 gatedCopy）：assess 的缓存对象是共享的，直接改会重复叠注记、重复降档。
+func (s *Server) applyQualityGate(ctx context.Context, a *analysis.Assessment) {
+	v, err := marketCache.GetOrSet("f10:"+a.SecID, 30*time.Minute, func() (any, error) {
+		return source.FetchF10(ctx, a.SecID)
+	})
+	if err != nil {
+		return
+	}
+	f, ok := v.(*model.F10)
+	if !ok || f == nil || len(f.Finance) == 0 {
+		return
+	}
+	cur := f.Finance[0]
+	switch {
+	case cur.RevenueYoy < -20 && cur.ProfitYoy < -20:
+		down := downgradeAdvice(a.Advice)
+		a.Notes = append(a.Notes, fmt.Sprintf("财报恶化（%s 营收 %+.0f%%/净利 %+.0f%%），建议降档为「%s」",
+			cur.Period, cur.RevenueYoy, cur.ProfitYoy, down))
+		a.Advice = down
+	case cur.RevenueYoy > 20 && cur.ProfitYoy > 20:
+		a.Notes = append(a.Notes, fmt.Sprintf("财报高增（%s 营收 %+.0f%%/净利 %+.0f%%）",
+			cur.Period, cur.RevenueYoy, cur.ProfitYoy))
+	}
+}
+
+// gatedCopy 取评估结论的独立副本：闸门要改 Notes/Advice，缓存对象是共享的，直接改会污染。
+func gatedCopy(a *analysis.Assessment) *analysis.Assessment {
+	cp := *a
+	cp.Notes = append([]string(nil), a.Notes...)
+	return &cp
 }
 
 // saveReport 分析结论落库为当日日报（每家标的每交易日一份，同日覆盖）。
@@ -126,6 +282,10 @@ func (s *Server) storedReport(secid, date string) (*analysis.Assessment, bool) {
 	var a analysis.Assessment
 	if err := json.Unmarshal([]byte(r.Payload), &a); err != nil {
 		log.Printf("[Analysis] %s %s 日报反序列化失败: %v", secid, date, err)
+		return nil, false
+	}
+	if a.Atr == 0 || len(a.Findings) == 0 || len(a.Findings[0].Subs) == 0 {
+		// 旧版日报缺 ATR/置信度/子项得分（模型口径升级前写的），按未命中处理，现算一次升级存档
 		return nil, false
 	}
 	return &a, true
@@ -296,6 +456,8 @@ func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	a = gatedCopy(a)                            // 闸门在副本上改，别污染 90 秒共享缓存
+	s.applyQualityGate(r.Context(), a) // 明细页才拉 F10 上质量闸门（批量不拉，避免撞东财限流）
 	writeJSON(w, a)
 }
 
@@ -353,7 +515,7 @@ func (s *Server) handleAnalysisBacktest(w http.ResponseWriter, r *http.Request) 
 	group, list := s.groupItems(r.URL.Query().Get("group"))
 	bars, _ := strconv.Atoi(r.URL.Query().Get("bars"))
 	if bars <= 0 || bars > 500 {
-		bars = 300
+		bars = 500 // 预热 250 根（年线口径）之后还要留足够的评估样本
 	}
 	key := "abtest:" + group + ":" + strconv.Itoa(bars)
 	v, err := marketCache.GetOrSet(key, 30*time.Minute, func() (any, error) {
@@ -398,6 +560,60 @@ func (s *Server) rollBacktest(ctx context.Context, group string, list []config.I
 		"evaluations": len(evals),
 		"horizons":    analysis.RollHorizons,
 		"buckets":     analysis.Aggregate(evals),
+		"calibration": calibrate(evals),
 		"note":        "毛收益（未计手续费）· 信号收盘后生成，入场=次根收盘，出场=入场后第 5/10/20 根收盘 · 样本=组内全部标的滚动重算",
 	}, nil
+}
+
+// calibrate 分档阈值校准：按时间前 70% 找"5 日超额转正"的最优阈值，后 30% 验证。
+// 只给建议不自动改模型——单组样本过拟合风险大，且我们已知评分是趋势跟随、随行情 regime 变化。
+func calibrate(evals []analysis.RollEval) map[string]any {
+	rows := make([]analysis.RollEval, 0, len(evals))
+	for _, e := range evals {
+		if e.Valid[0] {
+			rows = append(rows, e)
+		}
+	}
+	if len(rows) < 200 {
+		return map[string]any{"reliable": false, "reason": "样本不足（<200）"}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Date < rows[j].Date })
+	cut := len(rows) * 7 / 10
+	in, out := rows[:cut], rows[cut:]
+
+	bestT, bestEx := 0.0, -1e9
+	for t := 30.0; t <= 85; t += 5 {
+		if ex := excessAbove(in, t); ex > bestEx {
+			bestT, bestEx = t, ex
+		}
+	}
+	outEx := excessAbove(out, bestT)
+	return map[string]any{
+		"threshold":           bestT,
+		"in_sample_excess_5d": round2f(bestEx),
+		"out_sample_excess_5d": round2f(outEx),
+		"reliable":            outEx > 0,
+		"note":                "建议阈值 = 评分 ≥ 该值后 5 日超额收益转正的分界；后 30% 样本验证为正才可信，仅供参考不自动改模型",
+	}
+}
+
+// excessAbove 评分 ≥ 阈值的 5 日均收益相对全样本的超额（%）。
+func excessAbove(rows []analysis.RollEval, threshold float64) float64 {
+	sumAll, sumHi, nHi := 0.0, 0.0, 0.0
+	for _, e := range rows {
+		sumAll += e.Ret[0]
+		if e.Score >= threshold {
+			sumHi += e.Ret[0]
+			nHi++
+		}
+	}
+	if len(rows) == 0 || nHi == 0 {
+		return -1e9
+	}
+	return sumHi/nHi - sumAll/float64(len(rows))
+}
+
+// round2f 保留 2 位小数。
+func round2f(v float64) float64 {
+	return math.Round(v*100) / 100
 }

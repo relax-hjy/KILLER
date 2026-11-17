@@ -42,6 +42,17 @@
   .act-sell { background: var(--success-subtle); color: var(--down); border-color: rgba(101,185,143,.24); }
   .act-hold { background: rgba(255,255,255,.07); color: var(--text-tertiary); border-color: var(--border-default); }
   .g-reason { font-size: var(--font-meta); color: var(--text-tertiary); line-height: 1.5; max-width: 320px; }
+  /* 持仓应对预案 */
+  .plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px,1fr)); gap: 12px; }
+  .plan-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px 14px; }
+  .plan-head { display: flex; align-items: center; gap: 8px; font-size: var(--font-table); margin-bottom: 8px; }
+  .plan-head .code { color: var(--text-tertiary); font-size: var(--font-meta); }
+  .plan-steps { list-style: none; margin: 0; padding: 0; }
+  .plan-steps li { font-size: var(--font-meta); color: var(--text-secondary); line-height: 1.7; padding: 3px 0; border-top: 1px dashed var(--border-subtle); }
+  .plan-steps li:first-child { border-top: none; padding-top: 0; }
+  .plan-steps .k-if { color: var(--text-tertiary); margin-right: 2px; }
+  .plan-steps .k-then { color: var(--up); font-weight: 620; margin: 0 2px; }
+  .plan-steps .plan-then-txt { color: var(--text-primary); }
 </style></head>
 <body>
 <header>
@@ -87,6 +98,10 @@
         </tr></thead>
         <tbody id="guideHold"><tr><td colspan="11" class="loading">生成指导中（首次约 3-8 秒）…</td></tr></tbody>
       </table>
+    </div>
+    <div class="panel">
+      <h2>持仓应对预案 <span class="hint">买入后按"如果…就…"执行 · 跌破止损/涨到压力/大盘转弱时自动写入首页告警表（每只每天最多提醒一次）</span></h2>
+      <div class="plan-grid" id="guidePlan"><div class="loading">生成预案中 …</div></div>
     </div>
     <div class="panel">
       <h2>候选买入 <span class="hint">按最近交易日分析评分排序 · 只留买得起整手的 · 建议挂支撑附近不追高</span></h2>
@@ -462,17 +477,19 @@ async function placeOrder() {
 
 /* ---------- 交易指导 ---------- */
 let guideGroup = "";
-const actCls = a => a === "买入" || a === "加仓" ? "act-buy" : (a === "减仓" || a === "清仓" ? "act-sell" : "act-hold");
+const actCls = a => a === "买入" || a === "加仓" ? "act-buy" : (a === "减仓" || a === "清仓" || a === "止盈" ? "act-sell" : "act-hold");
 
 async function loadGuidance() {
   $("guideHold").innerHTML = `<tr><td colspan="11" class="loading">生成指导中（首次约 3-8 秒）…</td></tr>`;
   $("guideCand").innerHTML = `<tr><td colspan="10" class="loading">生成指导中 …</td></tr>`;
+  $("guidePlan").innerHTML = `<div class="loading">生成预案中 …</div>`;
   try {
     const r = await getJSON(`/api/trade/guidance?group=${encodeURIComponent(guideGroup)}&n=5`);
     renderGuidance(r);
   } catch (e) {
     $("guideHold").innerHTML = `<tr><td colspan="11" class="empty">指导生成失败：${e.message}</td></tr>`;
     $("guideCand").innerHTML = `<tr><td colspan="10" class="empty">指导生成失败：${e.message}</td></tr>`;
+    $("guidePlan").innerHTML = `<div class="empty">预案生成失败：${e.message}</div>`;
   }
 }
 
@@ -502,6 +519,12 @@ function renderGuidance(r) {
     <td class="num">${h.stop_loss ? fmt(h.stop_loss) : "—"}</td>
     <td class="g-reason">${h.reason}</td>
   </tr>`).join("") || `<tr><td colspan="11" class="empty">暂无持仓 — 在下方导入期初持仓，或到「交易下单」买入</td></tr>`;
+
+  $("guidePlan").innerHTML = (r.holdings || []).filter(h => h.plan && h.plan.length).map(h => `
+    <div class="plan-card">
+      <div class="plan-head"><b>${h.name}</b><span class="code">${h.code}</span><span class="act ${actCls(h.action)}">当前：${h.action}</span></div>
+      <ul class="plan-steps">${h.plan.map(s => `<li><span class="k-if">若</span>${s.if}<span class="k-then">→ 就</span><span class="plan-then-txt">${s.then}</span></li>`).join("")}</ul>
+    </div>`).join("") || `<div class="empty">暂无持仓 — 导入期初持仓或买入成交后，这里会生成每只的应对预案</div>`;
 
   $("guideCand").innerHTML = (r.candidates || []).map((c, i) => `<tr>
     <td>${c.name} <span style="color:var(--muted);font-size:11px">${c.code}</span></td>

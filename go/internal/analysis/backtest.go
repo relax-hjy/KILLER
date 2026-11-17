@@ -7,7 +7,7 @@ import "killer/internal/model"
 
 // 滚动回测的观察窗口（交易日）。
 const (
-	RollWarmup = 60 // 至少多少根历史才开始评估（MA60/ATR 需要窗口）
+	RollWarmup = 250 // 与年线 MA250 同口径：不足 250 根时年线项缺席，分层统计会混两种语义
 )
 
 // RollHorizons 未来收益观察期（根），顺序即 RollEval.Ret 与 BucketStat 各数组的顺序。

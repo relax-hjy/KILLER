@@ -60,6 +60,8 @@
   .arch-chip .sc { font-family: var(--font-display); font-weight: 640; font-variant-numeric: tabular-nums; }
   .arch-note { font-size: var(--font-meta); color: var(--text-tertiary); }
   .asm-arch { width: 100%; font-size: var(--font-meta); color: var(--warning); background: rgba(214,168,95,.11); border: 1px solid rgba(214,168,95,.24); border-radius: var(--radius-sm); padding: 6px 10px; }
+  .asm-notes { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+  .asm-note { font-size: var(--font-meta); color: var(--warning); background: rgba(214,168,95,.11); border: 1px solid rgba(214,168,95,.24); border-radius: var(--radius-sm); padding: 3px 9px; }
 </style></head>
 <body>
 <header>
@@ -109,7 +111,7 @@
     <div class="panel">
       <div class="arch-wrap">
         <button class="btn" id="btnRoll">对当前分组跑回测</button>
-        <span class="arch-note" id="rollMeta">300 根日K · 评估日只用历史数据，不存在未来函数 · 结果缓存 30 分钟</span>
+        <span class="arch-note" id="rollMeta">500 根日K · 预热 250 根（年线口径）· 评估日只用历史数据，不存在未来函数 · 结果缓存 30 分钟</span>
       </div>
       <table>
         <thead>
@@ -216,8 +218,21 @@ function selectItem(i) {
   archDate = null;
   document.querySelectorAll("#wlBody tr[data-i]").forEach(tr =>
     tr.classList.toggle("sel", parseInt(tr.dataset.i, 10) === i));
-  renderDetail(wlItems[i]);
+  renderDetail(wlItems[i]); // 先出列表口径，明细口径（带质量闸门）到了再覆盖
+  loadGatedDetail();
   loadArchive(wlItems[i] && wlItems[i].secid);
+}
+
+// 明细口径：单标的接口会上 F10 质量闸门（列表口径只上环境闸门，批量拉 F10 会撞东财限流）
+async function loadGatedDetail() {
+  const a = wlItems[selIdx];
+  if (!a || archDate) return;
+  try {
+    const full = await getJSON(`/api/analysis?secid=${encodeURIComponent(a.secid)}&name=${encodeURIComponent(a.name || "")}`);
+    if (!archDate && wlItems[selIdx] && wlItems[selIdx].secid === full.secid) {
+      renderDetail(full);
+    }
+  } catch (e) { /* 列表口径已渲染，失败不影响 */ }
 }
 
 /* ---------- 综合研判详情 ---------- */
@@ -231,7 +246,11 @@ function renderDetail(a) {
     ["分析参考价", fmt(a.price)],
     ["涨跌幅", pctStr(a.pct)],
     ["日K样本", `${a.kline_count} 根 · ${a.kline_date}`],
+    ["置信度", a.confidence != null ? `${a.confidence.toFixed(0)} / 100` : "—"],
+    ["市场环境", a.regime || "—"],
   ];
+  const notes = (a.notes && a.notes.length)
+    ? `<div class="asm-notes">${a.notes.map(n => `<span class="asm-note">${n}</span>`).join("")}</div>` : "";
   const archTip = archDate
     ? `<div class="asm-arch">存档日报 · ${archDate}（非实时结论，当日收盘后最后一次分析）</div>` : "";
   $("asmPanel").innerHTML = `
@@ -240,10 +259,11 @@ function renderDetail(a) {
       <span class="asm-name">${a.name}<span class="code">${a.code}</span></span>
       <span class="asm-price ${cls(a.pct)}">${fmt(a.price)}</span>
       <span class="${cls(a.pct)}" style="font-variant-numeric:tabular-nums">${pctStr(a.pct)}</span>
-      <span class="asm-score-box"><span class="num" style="color:${sc}">${a.score.toFixed(1)}</span><span class="den">/ 100 综合评分</span></span>
+      <span class="asm-score-box" title="综合评分 = 五个分析器加权：趋势30% + 动量25% + 量价20% + 支撑压力15% + 波动风险10%，换算到 0-100；50=中性，≥65 偏多、<35 回避"><span class="num" style="color:${sc}">${a.score.toFixed(1)}</span><span class="den">/ 100 综合评分</span></span>
       <span class="adv-badge ${advClass(a.advice)}" style="font-size:13px;padding:4px 14px">${a.advice}</span>
       <div class="asm-summary">${a.summary}</div>
     </div>
+    ${notes}
     <div class="lvl-kpis">${kpis.map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("")}</div>
     <div class="fd-grid">${(a.findings || []).map(fdCard).join("")}</div>`;
 }
@@ -283,6 +303,7 @@ async function openArchive(date) {
   if (date === "实时") {
     archDate = null;
     renderDetail(wlItems[selIdx]);
+    loadGatedDetail();
     renderArchive();
     return;
   }
@@ -305,7 +326,7 @@ function fdCard(f) {
     ? `left:50%;width:${w}%;background:${color}`
     : `right:50%;width:${w}%;background:${color}`;
   const vClass = f.verdict === "偏多" ? "adv-buy" : (f.verdict === "偏空" ? "adv-sell" : "adv-hold");
-  return `<div class="fd-card">
+  return `<div class="fd-card" data-analyzer="${f.analyzer}" data-finding="${encodeURIComponent(JSON.stringify(f))}">
     <div class="fd-head"><span class="fd-title">${f.title}</span><span class="adv-badge ${vClass}">${f.verdict}</span></div>
     <div class="fd-scoreline">
       <span class="fd-val" style="color:${color}">${f.score > 0 ? "+" : ""}${f.score.toFixed(0)}</span>
@@ -313,6 +334,7 @@ function fdCard(f) {
     </div>
     <div class="fd-detail">${f.detail}</div>
     <div class="fd-reason">${f.reason}</div>
+    <div class="fd-x-hint">点击卡片看分析详情（这是什么 / 分数从哪来 / 怎么看）</div>
   </div>`;
 }
 
@@ -321,11 +343,15 @@ const pct2 = v => (v > 0 ? "+" : "") + v.toFixed(2) + "%";
 async function loadBacktest() {
   const btn = $("btnRoll");
   btn.disabled = true;
-  $("rollBody").innerHTML = `<tr><td colspan="12" class="loading">滚动重算中（组内每只 300 根日K，首次约 5-15 秒）…</td></tr>`;
+  $("rollBody").innerHTML = `<tr><td colspan="12" class="loading">滚动重算中（组内每只 500 根日K，首次约 5-20 秒）…</td></tr>`;
   $("rollMeta").textContent = "正在拉取日K并逐日重算评分 …";
   try {
-    const r = await getJSON(`/api/analysis/backtest?group=${encodeURIComponent(group || "")}&bars=300`);
-    $("rollMeta").textContent = `分组「${r.group}」${r.securities} 只 · ${r.bars} 根日K · 评估 ${r.evaluations} 次 · ${r.note}`;
+    const r = await getJSON(`/api/analysis/backtest?group=${encodeURIComponent(group || "")}&bars=500`);
+    const cal = r.calibration || {};
+    const calTip = cal.threshold != null
+      ? ` · 校准：评分 ≥ ${cal.threshold} 后 5 日超额 ${cal.out_sample_excess_5d > 0 ? "+" : ""}${cal.out_sample_excess_5d}%（样本外${cal.reliable ? "验证成立" : "验证不成立，勿用"}）`
+      : (cal.reason ? ` · 校准：${cal.reason}` : "");
+    $("rollMeta").textContent = `分组「${r.group}」${r.securities} 只 · ${r.bars} 根日K · 评估 ${r.evaluations} 次 · ${r.note}${calTip}`;
     $("rollBody").innerHTML = (r.buckets || []).map(b => `
       <tr>
         <td>${b.bucket}</td>
@@ -344,6 +370,7 @@ async function loadBacktest() {
   }
 }
 $("btnRoll").onclick = loadBacktest;
+bindFindingCards($("asmPanel")); // 点分析器卡片展开"分析详情"
 
 $("btnRefresh").onclick = loadWatchlist;
 

@@ -71,6 +71,100 @@ function cssVar(name, fallback) {
   return v || fallback;
 }
 
+/* ---------- 分析器科普（点卡片展开"分析详情"） ----------
+ * 给不熟技术指标的用户看：每张卡片点开解释"这是什么/每个子项啥意思/怎么看结论"。
+ * terms 的键要与 analysis.SubScore.Name 对应（有单测保证子项齐全）。
+ */
+const ANALYZER_GUIDE = {
+  trend: {
+    weight: "30%",
+    what: "看趋势的方向和强度。均线（MA）是最近 N 天收盘价的平均：MA5≈一周、MA20≈一月、MA60≈一季、MA250（年线）≈一年。短期均线排在长期之上、价格站在均线上方，就是上升趋势。",
+    terms: {
+      "均线排列": "MA5/MA10/MA20 的上下次序：多头排列=短在上、长在下（趋势向上），空头排列反之",
+      "价与MA20": "价格在 20 日均线上方=中期趋势健康",
+      "MA20斜率": "20 日均线最近 5 天在抬升还是下沉（趋势在加速还是减速）",
+      "价与MA60": "季度成本线；价格在其上=中期趋势向上",
+      "年线MA250": "一年成本线，牛熊分界；上市不足 250 个交易日时不打分（没有年线可比）",
+      "周线共振": "把日K合成周K后 MA5/MA10 与价格是否同向——大周期也在走强才可靠",
+    },
+    how2: "偏多=趋势向上，顺势做胜率高；偏空=下降趋势，别轻易接飞刀。它的弱点是滞后：横盘震荡时会反复给假信号，要配合动量和支撑压力一起看。",
+  },
+  momentum: {
+    weight: "25%",
+    what: "看涨跌的“劲头”还在不在。MACD 是快慢均线的差值（金叉=短期动能转强、死叉=转弱），RSI 衡量最近涨跌的力度（0~100：>70 超买、<30 超卖）。",
+    terms: {
+      "MACD状态": "DIF 是否在 DEA 之上：金叉状态=动能偏强",
+      "动能方向": "MACD 柱子（DIF−DEA）比上一根在变长还是变短：红柱走强=加速",
+      "RSI强弱": "50~70 强势区间加分；>70 短期透支（超买）；<30 跌过头（超卖，有反弹空间）",
+    },
+    how2: "偏多=上涨动能还在；超买=短期涨太多，追高容易吃回撤；超卖=可能反弹，但也可能是下跌中继，别单看这一项。",
+  },
+  volume: {
+    weight: "20%",
+    what: "看成交量和价格是否配合。放量上涨=真金白银进场（可信）；缩量上涨=没人跟涨（容易掉头）；放量下跌=抛压重。",
+    terms: {
+      "量价配合": "量比（5 日均量/20 日均量）与近 5 日涨跌的组合结论",
+    },
+    how2: "量价配合趋势才可靠。这一项是单项打分（不是多子项加总），权重 20%。",
+  },
+  support: {
+    weight: "15%",
+    what: "看价格在近期波动区间里的位置。支撑=近 20 日最低价（跌到附近常有买盘），压力=近 120 日最高价（解套抛压区）。买得便宜与否就是这一项。",
+    terms: {
+      "区间位置": "现价在近 20 日高低区间中的相对位置：越靠下越便宜、越靠上越贵；突破 20 日/120 日高点单独加分",
+    },
+    how2: "这是“买点位置”的维度，和趋势互补：追强势看趋势，等回踩看支撑。注意低点刚刷新（支撑还在塌）时不给低吸分。",
+  },
+  volatility: {
+    weight: "10%",
+    what: "看这只股票平时波动多大。ATR（平均真实波幅）是近 14 日平均每天的振幅，占现价百分比；再和它自己过去一年比，是偏安静还是偏躁动。",
+    terms: {
+      "波动水平": "当前 ATR% 在自身一年里的分位：低位=拿得住，高位=容易被洗出去",
+      "波动趋势": "近 5 日振幅是否比近 20 日放大 30% 以上（波动开始变大）",
+    },
+    how2: "波动越大，仓位越要小、止损越要宽。同一评分下，波动大的股票实际风险更高——看置信度和这项分位再决定买多少。",
+  },
+};
+
+// explainFindingHTML 单个分析器的展开详情：这是什么 / 子项得分表 / 怎么看。
+function explainFindingHTML(f) {
+  const g = ANALYZER_GUIDE[f.analyzer] || {};
+  const rows = (f.subs || []).map(s => `
+    <tr>
+      <td><b>${s.name}</b><div class="fd-x-term">${(g.terms && g.terms[s.name]) || ""}</div></td>
+      <td class="fd-x-score ${s.score > 0 ? "up" : (s.score < 0 ? "down" : "flat")}">${s.score > 0 ? "+" : ""}${s.score.toFixed(0)}</td>
+      <td>${s.note || "—"}</td>
+    </tr>`).join("");
+  return `
+    <div class="fd-x-sec"><b>这是什么：</b>${g.what || ""}</div>
+    <div class="fd-x-sec"><b>得分明细</b>（子项合计 ${f.score > 0 ? "+" : ""}${f.score.toFixed(0)} 分，该项在综合评分里占 ${g.weight || ""}）</div>
+    <table class="fd-x-table">
+      <thead><tr><th>子项</th><th>得分</th><th>当前读数</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="fd-x-sec"><b>怎么看：</b>${g.how2 || ""}</div>
+    <div class="fd-x-sec"><b>本项结论：</b>${f.reason || "—"}<span class="fd-x-term">（${f.detail || ""}）</span></div>`;
+}
+
+// bindFindingCards 给分析器卡片绑"点击展开/收起详情"。
+function bindFindingCards(container) {
+  if (!container) return;
+  container.addEventListener("click", e => {
+    const card = e.target.closest(".fd-card, .asm-fd > div");
+    if (!card || !card.dataset.analyzer) return;
+    const open = card.querySelector(".fd-explain");
+    if (open) { open.remove(); card.classList.remove("open"); return; }
+    // 一次只展开一张
+    container.querySelectorAll(".fd-explain").forEach(x => x.remove());
+    container.querySelectorAll(".open").forEach(x => x.classList.remove("open"));
+    const div = document.createElement("div");
+    div.className = "fd-explain";
+    div.innerHTML = explainFindingHTML(JSON.parse(decodeURIComponent(card.dataset.finding)));
+    card.appendChild(div);
+    card.classList.add("open");
+  });
+}
+
 /* ---------- 图表绘制（共享） ----------
  * 绘制一条收盘价时间序列折线。所有页面共用，避免多处重复实现。
  * opts: { base, showBaseLine, lineColor, labelDigits }

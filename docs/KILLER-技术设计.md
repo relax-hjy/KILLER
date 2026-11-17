@@ -49,7 +49,7 @@ cmd/killer/main.go ── 装配
 |---|---|---|
 | id | INTEGER PK | 自增 |
 | secid / name | TEXT | 指数/个股标识 |
-| type | TEXT | change_up / change_down / amplitude / stock_change_up / stock_change_down |
+| type | TEXT | change_up / change_down / amplitude / stock_change_up / stock_change_down / position_stop / position_take / regime_weak（后三种为持仓盯盘写入，见监控逻辑要点） |
 | value | REAL | 触发值（%） |
 | threshold | REAL | 阈值（%） |
 | price | REAL | 触发时点位 |
@@ -187,6 +187,7 @@ config / model → （无内部依赖）
 - **交易时段**：`trading_hours_only=true` 时仅在北京时间周一至五 9:15–11:35 / 13:00–15:05 触发告警（快照照常落库）；时区加载失败兜底 UTC+8
 - **容灾**：三类标的分别按路由尝试——指数（东财/新浪路由）、板块（腾讯 pt 代码，固定）、ETF（腾讯批量，固定）；任一类失败不拖累另两类
 - **自选个股巡检**（2026-11-11 新增）：每轮随大盘巡检一并检查 `watch_stock`，|涨跌幅| ≥ 个股独立阈值 → `stock_change_up/down` 告警，冷却与指数共用（同 secid+类型）
+- **持仓盯盘**（2026-11-18 新增，web 层 `positionwatch.go`，非 monitor 包——价位来自分析研判，只有 web 层有 `assess`）：交易时段每 check_interval（60s）拉持仓行情比对预案价位——现价跌破 `StopLossAt(买入价)` → `position_stop`、涨到压力位且有浮盈 → `position_take`、大盘环境转弱势 → `regime_weak`（secid=`market.regime`，环境分 5 分钟缓存）；预案类告警同标的同类型**每交易日一次**（`shouldFireDaily`，30 分钟冷却对"当天行动一次"的预案会整天刷屏）；休市跳过，无持仓时仍巡大盘环境
 
 ## 技术约束
 - 禁止 CGO：必须保持 `go build` 免 C 编译器（驱动选型已保证）
