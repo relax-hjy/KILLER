@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"strings"
 	"testing"
 
 	"killer/internal/model"
@@ -78,30 +79,48 @@ func TestAssessDowntrend(t *testing.T) {
 	}
 }
 
-// TestAssessLevels 支撑=近20日最低，压力=近60日最高。
+// TestAssessLevels 支撑=近20日最低，压力=近120日最高。
 func TestAssessLevels(t *testing.T) {
 	klines := genKlines(80, 0.5, 1e6, 0)
 	a, err := Assess("1.600000", "测试股", klines, 0, 0)
 	if err != nil {
 		t.Fatalf("Assess 失败: %v", err)
 	}
-	// 上升趋势：支撑=第61根起（近20根）的最低 Low，压力=全部最高 High
-	var lo20, hi60 float64 = 1e18, 0
+	// 上升趋势：支撑=第61根起（近20根）的最低 Low，压力=近120根（本例即全部80根）最高 High
+	var lo20, hi120 float64 = 1e18, 0
 	for i := 60; i < 80; i++ {
 		if klines[i].Low < lo20 {
 			lo20 = klines[i].Low
 		}
 	}
 	for _, k := range klines {
-		if k.High > hi60 {
-			hi60 = k.High
+		if k.High > hi120 {
+			hi120 = k.High
 		}
 	}
 	if a.Support != round2(lo20) {
 		t.Errorf("支撑位应为近20日最低 %.2f，实际 %.2f", lo20, a.Support)
 	}
-	if a.Resistance != round2(hi60) {
-		t.Errorf("压力位应为近60日最高 %.2f，实际 %.2f", hi60, a.Resistance)
+	if a.Resistance != round2(hi120) {
+		t.Errorf("压力位应为近120日最高 %.2f，实际 %.2f", hi120, a.Resistance)
+	}
+}
+
+// TestResistance120Day 压力位取近120日最高（而非60日）：仅前段冲高、近60日回落时仍应取前段高点。
+func TestResistance120Day(t *testing.T) {
+	kl := make([]model.Kline, 150)
+	for i := range kl {
+		high := 10.0
+		if i < 50 {
+			high = 20.0 // 第1~50根冲高，距今100~150根前
+		}
+		kl[i] = model.Kline{
+			Date: "2026-01-01", Open: 10, Close: 10, High: high, Low: 9.5, Volume: 1e6,
+		}
+	}
+	lv := calcLevels(kl, 10)
+	if lv.resistance != 20.0 {
+		t.Errorf("压力位应取近120日最高 20.00（覆盖前段冲高），实际 %.2f", lv.resistance)
 	}
 }
 
@@ -137,6 +156,32 @@ func TestStopLossClamp(t *testing.T) {
 	lv = levels{support: 95, atr: 1} // 94 > 92，用支撑-ATR
 	if sl := stopLossOf(100, lv); sl != 94 {
 		t.Errorf("止损应为支撑-ATR=94，实际 %.2f", sl)
+	}
+}
+
+// TestTrendYearLine 趋势分析含年线维度：其余维度同分时，站上年线比跌破年线多 30 分（+15 vs -15）。
+func TestTrendYearLine(t *testing.T) {
+	// 构造 300 根：长期 10 元横盘、最后 30 根跌到 8 —— MA60≈9、MA250≈9.76。
+	// 取现价 9.5（站上 MA60、跌破年线）与 10（两者都站上），仅年线维度不同。
+	kl := make([]model.Kline, 300)
+	for i := range kl {
+		px := 10.0
+		if i >= 270 {
+			px = 8.0
+		}
+		kl[i] = model.Kline{Date: "2026-01-01", Open: px, Close: px, High: px * 1.01, Low: px * 0.99, Volume: 1e6}
+	}
+	below := runTrend(kl, 9.5, levels{})
+	if !strings.Contains(below.Reason, "年线下方") {
+		t.Errorf("跌破年线应有标记，实际 reason=%s", below.Reason)
+	}
+	above := runTrend(kl, 10.0, levels{})
+	if !strings.Contains(above.Reason, "站上年线") {
+		t.Errorf("站上年线应有标记，实际 reason=%s", above.Reason)
+	}
+	if above.Score-below.Score != 30 {
+		t.Errorf("年线维度分差应为 30（+15 vs -15），实际 %.1f（above=%.1f below=%.1f）",
+			above.Score-below.Score, above.Score, below.Score)
 	}
 }
 

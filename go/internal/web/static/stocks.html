@@ -8,6 +8,28 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Host+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/market.css">
+<style>
+/* 详情抽屉：主营业务 / 财报摘要 tab（仅本页） */
+.f10-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  margin-top: 16px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.hold-period { font-size: var(--font-meta); color: var(--text-tertiary); white-space: nowrap; }
+.hold-note { font-size: var(--font-table); color: var(--text-tertiary); padding: 10px 0; }
+#dF10, #dFin { margin-top: 6px; }
+#dF10 .f10-text { font-size: var(--font-table); color: var(--text-secondary); line-height: 1.7; margin: 4px 0 8px; }
+#dF10 .f10-label { color: var(--text-tertiary); }
+/* 数值列右对齐 + 等宽数字，避免表格列头错位（与全站表头约定一致） */
+#dF10 td:nth-child(n+3), #dF10 th:nth-child(n+3),
+#dFin td:not(:first-child), #dFin th:not(:first-child) {
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+/* 财报转置表：首列为指标名（左对齐、次要色），单元格内主值+同比小字 */
+#dFin td:first-child { color: var(--text-tertiary); white-space: nowrap; }
+#dFin td .v { color: var(--text-primary); }
+#dFin .yoy { display: block; font-size: var(--font-meta); line-height: 1.3; }
+</style>
 </head>
 <body>
 <header>
@@ -80,11 +102,20 @@
   <h2 id="dName">—</h2>
   <div class="sub" id="dSub">—</div>
   <div style="display:flex;gap:8px;margin-bottom:12px" class="tabs">
-    <button id="dKline" class="on">日 K（120日）</button>
+    <button id="dKline" class="on">日 K（250日）</button>
     <button id="dIntraday">当日分时</button>
   </div>
   <canvas id="dChart"></canvas>
   <div class="kpis" id="dKpis"></div>
+  <div class="f10-head">
+    <div style="display:flex;gap:8px" class="tabs">
+      <button id="dBiz" class="on">主营业务</button>
+      <button id="dFinTab">财报摘要</button>
+    </div>
+    <span class="hold-period" id="dF10Meta"></span>
+  </div>
+  <div id="dF10"><div class="hold-note">加载中 …</div></div>
+  <div id="dFin" style="display:none"><div class="hold-note">加载中 …</div></div>
 </div>
 
 <footer>数据来源：新浪财经 / 东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
@@ -92,7 +123,7 @@
 <script src="/common.js"></script>
 <script>
 "use strict";
-const STATE = { page: 1, sort: "f20", asc: false, total: 0, stocks: [], watch: [], q: "", search: [], detail: null, detailTab: "kline" };
+const STATE = { page: 1, sort: "f20", asc: false, total: 0, stocks: [], watch: [], q: "", search: [], detail: null, detailTab: "kline", f10Tab: "biz", f10: null };
 
 // ---- 自选 ----
 async function loadWatch() {
@@ -246,8 +277,11 @@ const kpiAmt = v => typeof v === "number" && !Number.isNaN(v) ? fmtAmt(v) : "—
 function openDetail(s) {
   STATE.detail = s;
   STATE.detailTab = "kline";
+  STATE.f10 = null;
+  STATE.f10Tab = "biz";
   $("dKline").classList.add("on");
   $("dIntraday").classList.remove("on");
+  switchF10Tab("biz");
   $("dName").textContent = `${s.name || s.code} · ${s.code}`;
   $("dSub").innerHTML = s.price
     ? `现价 <span class="${cls(s.pct)}">${fmt(s.price)}（${pctStr(s.pct)}）</span>`
@@ -260,6 +294,7 @@ function openDetail(s) {
   ].map(([k, v]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   $("detail").classList.add("open");
   loadDetailChart();
+  loadF10(s);
 }
 function closeDetail() { $("detail").classList.remove("open"); STATE.detail = null; }
 
@@ -268,7 +303,7 @@ async function loadDetailChart() {
   if (!s) return;
   const path = STATE.detailTab === "kline" ? "kline" : "intraday";
   try {
-    const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=120" : ""}`);
+    const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=250" : ""}`);
     drawDetail(data);
   } catch (e) {
     const { ctx, w, h } = setupCanvas($("dChart"), 260);
@@ -282,6 +317,100 @@ function drawDetail(data) {
     emptyText: "暂无数据",
     labelDigits: 2,
   });
+}
+
+// ---- 主营与财报（/api/f10，东财 F10，后端 30 分钟缓存）----
+// 两个区块数据一次拉全，用「主营业务 / 财报摘要」tab 并列切换展示。
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const f10MetaFor = tab => {
+  const d = STATE.f10;
+  if (!d) return "";
+  if (tab === "fin") return d.finance && d.finance.length ? `最近 ${d.finance.length} 期 · 累计口径 · 东财 F10` : "";
+  return [d.industry, d.main_op_period].filter(Boolean).join(" · ");
+};
+function switchF10Tab(tab) {
+  STATE.f10Tab = tab;
+  $("dBiz").classList.toggle("on", tab === "biz");
+  $("dFinTab").classList.toggle("on", tab === "fin");
+  $("dF10").style.display = tab === "biz" ? "" : "none";
+  $("dFin").style.display = tab === "fin" ? "" : "none";
+  $("dF10Meta").textContent = f10MetaFor(tab);
+}
+$("dBiz").onclick = () => switchF10Tab("biz");
+$("dFinTab").onclick = () => switchF10Tab("fin");
+
+async function loadF10(s) {
+  const note = `<div class="hold-note">主营与财报暂不可用（东财限流期降级，恢复后自动显示）</div>`;
+  $("dF10Meta").textContent = "";
+  $("dF10").innerHTML = `<div class="hold-note">加载中 …</div>`;
+  $("dFin").innerHTML = `<div class="hold-note">加载中 …</div>`;
+  if (!s || !s.secid) {
+    $("dF10").innerHTML = $("dFin").innerHTML = `<div class="hold-note">缺少 secid，无法查询</div>`;
+    return;
+  }
+  let d;
+  try {
+    d = await getJSON(`/api/f10?secid=${encodeURIComponent(s.secid)}`);
+  } catch (e) {
+    $("dF10").innerHTML = $("dFin").innerHTML = note;
+    return;
+  }
+  if (!STATE.detail || STATE.detail.secid !== s.secid) return; // 抽屉已切走，丢弃过期响应
+  renderF10(d);
+}
+function renderF10(d) {
+  STATE.f10 = d;
+  const profile = (d.profile || "").trim();
+  const scope = (d.business_scope || "").trim();
+  const ops = d.main_ops || [];
+  let html = "";
+  if (profile) html += `<div class="f10-text"><span class="f10-label">简介 · </span>${esc(profile)}</div>`;
+  if (scope) html += `<div class="f10-text"><span class="f10-label">经营范围 · </span>${esc(scope)}</div>`;
+  if (ops.length) {
+    html += `<table><thead><tr><th>分类</th><th>项目</th><th>主营收入</th><th>占比</th><th>毛利率</th></tr></thead><tbody>` +
+      ops.map(o => `<tr>
+        <td>${esc(o.kind)}</td>
+        <td>${esc(o.name)}</td>
+        <td>${fmtAmt(o.income)}</td>
+        <td>${fmt(o.ratio)}%</td>
+        <td>${o.margin > 0 ? fmt(o.margin) + "%" : "—"}</td>
+      </tr>`).join("") + `</tbody></table>`;
+  }
+  $("dF10").innerHTML = html || `<div class="hold-note">暂无主营数据</div>`;
+
+  const fin = d.finance || [];
+  if (!fin.length) { $("dFin").innerHTML = `<div class="hold-note">暂无财报数据</div>`; $("dF10Meta").textContent = f10MetaFor(STATE.f10Tab); return; }
+  // 转置对比表：行=指标、列=报告期（560px 抽屉内信息密度最高，年报/季报横向可比）
+  const yoy = v => `<span class="yoy ${cls(v)}">${pctStr(v)}</span>`;
+  const amt = (v, y) => {
+    if (!v) return "—";
+    const s = (v < 0 ? "-" : "") + fmtAmt(Math.abs(v));
+    return `<span class="v">${s}</span>` + (y == null ? "" : yoy(y));
+  };
+  const pct = v => v ? `<span class="v">${fmt(v, 1)}%</span>` : "—";
+  const num = v => v ? `<span class="v">${fmt(v, 2)}</span>` : "—";
+  const rows = [
+    ["营业总收入", f => amt(f.revenue, f.revenue_yoy)],
+    ["归母净利润", f => amt(f.profit, f.profit_yoy)],
+    ["扣非净利润", f => amt(f.deduct, f.deduct_yoy)],
+    ["销售毛利率", f => pct(f.margin)],
+    ["销售净利率", f => pct(f.net_margin)],
+    ["加权 ROE", f => pct(f.roe)],
+    ["基本每股收益", f => num(f.eps)],
+    ["每股净资产", f => num(f.bps)],
+    ["资产负债率", f => pct(f.debt_ratio)],
+    ["经营现金流", f => amt(f.operate_cash, null)],
+    ["总资产", f => amt(f.total_assets, null)],
+  ];
+  $("dFin").innerHTML =
+    `<table><thead><tr><th>指标</th>` +
+    fin.map(f => `<th>${esc(f.period)}</th>`).join("") +
+    `</tr></thead><tbody>` +
+    rows.map(([name, cell]) =>
+      `<tr><td>${esc(name)}</td>` + fin.map(f => `<td>${cell(f)}</td>`).join("") + `</tr>`
+    ).join("") + `</tbody></table>`;
+  $("dF10Meta").textContent = f10MetaFor(STATE.f10Tab);
 }
 
 $("dKline").onclick = () => {

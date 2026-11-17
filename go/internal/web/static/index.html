@@ -31,7 +31,7 @@
       <h2 id="chartTitle">走势图</h2>
       <div class="tabs">
         <button id="tabIntraday" class="on" onclick="switchTab('intraday')">当日分时</button>
-        <button id="tabKline" onclick="switchTab('kline')">日 K（120日）</button>
+        <button id="tabKline" onclick="switchTab('kline')">日 K（250日）</button>
       </div>
     </div>
     <canvas id="chart"></canvas>
@@ -193,7 +193,7 @@ async function loadIntraday() {
 }
 async function loadKline() {
   const seq = ++loadSeq, secid = STATE.secid;
-  const data = await getJSON(`/api/kline?secid=${secid}&limit=120`);
+  const data = await getJSON(`/api/kline?secid=${secid}&limit=250`);
   if (seq !== loadSeq) return;
   klineData = data; klineFor = secid;
 }
@@ -209,7 +209,7 @@ function drawChart() {
   const c = $("chart");
   const cur = findQuote(STATE.secid);
   $("chartTitle").textContent = (cur ? cur.name + " · " : "") +
-    (STATE.tab === "intraday" ? "当日分时走势" : "日 K 收盘走势（120日）");
+    (STATE.tab === "intraday" ? "当日分时走势" : "日 K 收盘走势（250日）");
 
   // 全球标的无历史走势数据
   if (isGlobalSecid(STATE.secid)) {

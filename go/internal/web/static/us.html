@@ -116,7 +116,7 @@
   <h2 id="dName">—</h2>
   <div class="sub" id="dSub">—</div>
   <div style="display:flex;gap:8px;margin-bottom:12px" class="tabs">
-    <button id="dKline" class="on">日 K（120日）</button>
+    <button id="dKline" class="on">日 K（250日）</button>
     <button id="dIntraday">当日分时</button>
   </div>
   <canvas id="dChart"></canvas>
@@ -323,7 +323,7 @@ async function loadDetailChart() {
   if (!s) return;
   const path = STATE.detailTab === "kline" ? "kline" : "intraday";
   try {
-    const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=120" : ""}`);
+    const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=250" : ""}`);
     drawDetail(data);
   } catch (e) {
     const { ctx, w, h } = setupCanvas($("dChart"), 260);

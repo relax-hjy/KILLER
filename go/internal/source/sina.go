@@ -122,7 +122,7 @@ func (s *SinaSource) FetchKline(ctx context.Context, secid string, limit int) ([
 	}
 	defer resp.Body.Close()
 
-	// ReadAll 而非单次 Read：limit=120 的日K响应会因 TCP 分段截断
+	// ReadAll 而非单次 Read：大根数（如 limit=250）的日K响应会因 TCP 分段截断
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, fmt.Errorf("sina 读取响应失败: %w", err)

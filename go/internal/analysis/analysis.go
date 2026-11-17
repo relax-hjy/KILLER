@@ -2,10 +2,10 @@
 // 输出综合评分（0-100）与当下操作建议（是否为合理买点、支撑/压力/止损参考位）。
 //
 // 内置五个分析系统（各自独立打分 -100~+100，加权合成）：
-//   - trend      趋势分析：均线排列、价格与均线位置、均线斜率
+//   - trend      趋势分析：均线排列、价格与均线位置（含年线 MA250）、均线斜率
 //   - momentum   动量分析：MACD 金叉死叉与柱状方向、RSI 超买超卖
 //   - volume     量价分析：量比、放量上攻/放量下跌/缩量回调等配合关系
-//   - support    支撑压力：现价在 60 日区间的位置、支撑位/压力位距离
+//   - support    支撑压力：现价在 20 日低~120 日高区间的位置、支撑位/压力位距离
 //   - volatility 波动风险：ATR% 与近期振幅，衡量追高风险
 package analysis
 
@@ -47,7 +47,7 @@ type Assessment struct {
 	Advice      string    `json:"advice"`      // 当下操作建议
 	Summary     string    `json:"summary"`     // 一句话综述（主要理由 + 风险提示）
 	Support     float64   `json:"support"`     // 支撑位（近 20 日最低）
-	Resistance  float64   `json:"resistance"`  // 压力位（近 60 日最高）
+	Resistance  float64   `json:"resistance"`  // 压力位（近 120 日最高）
 	StopLoss    float64   `json:"stop_loss"`   // 参考止损位（支撑下方 1×ATR，且不深于 -8%）
 	Findings    []Finding `json:"findings"`    // 各分析系统结论（展示顺序）
 	KlineCount  int       `json:"kline_count"` // 参与计算的日K根数
@@ -75,7 +75,7 @@ var analyzers = []analyzer{
 // levels 支撑/压力/波动幅度计算结果（支撑压力与止损共用）。
 type levels struct {
 	support    float64 // 近 20 日最低
-	resistance float64 // 近 60 日最高
+	resistance float64 // 近 120 日最高
 	atr        float64 // 近 14 日均真实波幅（绝对值）
 	atrPct     float64 // ATR 占现价比例（%）
 }
@@ -133,7 +133,7 @@ func Assess(secid, name string, klines []model.Kline, price, pct float64) (*Asse
 	}, nil
 }
 
-// calcLevels 计算支撑/压力/ATR。支撑=近 20 日最低，压力=近 60 日最高。
+// calcLevels 计算支撑/压力/ATR。支撑=近 20 日最低，压力=近 120 日最高。
 func calcLevels(klines []model.Kline, price float64) levels {
 	var lv levels
 	n := len(klines)
@@ -144,14 +144,14 @@ func calcLevels(klines []model.Kline, price float64) levels {
 			lo20 = klines[i].Low
 		}
 	}
-	hi60 := klines[n-1].High
-	for i := n - 2; i >= 0 && i >= n-60; i-- {
-		if klines[i].High > hi60 {
-			hi60 = klines[i].High
+	hi120 := klines[n-1].High
+	for i := n - 2; i >= 0 && i >= n-120; i-- {
+		if klines[i].High > hi120 {
+			hi120 = klines[i].High
 		}
 	}
 	lv.support = lo20
-	lv.resistance = hi60
+	lv.resistance = hi120
 
 	// ATR14（真实波幅 = max(高-低, |高-前收|, |低-前收|)）
 	sum := 0.0
@@ -189,41 +189,43 @@ func stopLossOf(price float64, lv levels) float64 {
 	return sl
 }
 
-// runTrend 趋势分析：均线排列（40）+ 价与 MA20 位置（25）+ MA20 斜率（25）+ 价与 MA60 位置（10）。
+// runTrend 趋势分析：均线排列（35）+ 价与 MA20 位置（20）+ MA20 斜率（20）+ 价与 MA60 位置（10）+ 价与年线 MA250 位置（15）。
+// 年线是长周期多空分界：站上偏多、跌破偏空；历史不足 250 根时 sma 退化为全历史均线（上市不久的标的仍按可得数据评）。
 func runTrend(klines []model.Kline, price float64, _ levels) Finding {
 	closes := closesOf(klines)
 	ma5 := sma(closes, 5)
 	ma10 := sma(closes, 10)
 	ma20 := sma(closes, 20)
 	ma60 := sma(closes, 60)
+	ma250 := sma(closes, 250)
 
 	score := 0.0
 	var tags []string
 	switch {
 	case ma5 > ma10 && ma10 > ma20:
-		score += 40
+		score += 35
 		tags = append(tags, "均线多头排列")
 	case ma5 < ma10 && ma10 < ma20:
-		score -= 40
+		score -= 35
 		tags = append(tags, "均线空头排列")
 	default:
 		tags = append(tags, "均线缠绕")
 	}
 	if price > ma20 {
-		score += 25
+		score += 20
 		tags = append(tags, "价站上MA20")
 	} else {
-		score -= 25
+		score -= 20
 		tags = append(tags, "价跌破MA20")
 	}
 	// MA20 五日前后对比取斜率
 	if len(closes) >= 25 {
 		ma20Prev := sma(closes[:len(closes)-5], 20)
 		if ma20 > ma20Prev*1.005 {
-			score += 25
+			score += 20
 			tags = append(tags, "MA20上行")
 		} else if ma20 < ma20Prev*0.995 {
-			score -= 25
+			score -= 20
 			tags = append(tags, "MA20下行")
 		}
 	}
@@ -233,9 +235,16 @@ func runTrend(klines []model.Kline, price float64, _ levels) Finding {
 		score -= 10
 		tags = append(tags, "价在MA60下方")
 	}
+	if price > ma250 {
+		score += 15
+		tags = append(tags, "价站上年线")
+	} else {
+		score -= 15
+		tags = append(tags, "价在年线下方")
+	}
 	return Finding{
 		Analyzer: NameTrend, Title: "趋势分析", Score: score,
-		Detail: fmt.Sprintf("MA5=%.2f MA20=%.2f MA60=%.2f，现价 %.2f", ma5, ma20, ma60, price),
+		Detail: fmt.Sprintf("MA5=%.2f MA20=%.2f MA60=%.2f MA250=%.2f，现价 %.2f", ma5, ma20, ma60, ma250, price),
 		Reason: strings.Join(tags, "，"),
 	}
 }
@@ -332,7 +341,7 @@ func runVolume(klines []model.Kline, _ float64, _ levels) Finding {
 	}
 }
 
-// runSupport 支撑压力：现价在 20日低~60日高 区间的位置打分，突破与逼近上沿单独处理。
+// runSupport 支撑压力：现价在 20日低~120日高 区间的位置打分，突破与逼近上沿单独处理。
 func runSupport(klines []model.Kline, price float64, lv levels) Finding {
 	if lv.resistance <= lv.support {
 		return Finding{
@@ -341,19 +350,19 @@ func runSupport(klines []model.Kline, price float64, lv levels) Finding {
 			Reason: "高低点区间异常，暂无法判断",
 		}
 	}
-	// 突破 60 日高点：强势但需防回踩
+	// 突破 120 日高点：强势但需防回踩
 	if price > lv.resistance {
 		return Finding{
 			Analyzer: NameSupport, Title: "支撑压力", Score: 25,
-			Detail: fmt.Sprintf("支撑=%.2f（20日低）压力=%.2f（60日高），现价 %.2f 已突破上沿", lv.support, lv.resistance, price),
-			Reason: "突破60日高点，强势；注意回踩确认",
+			Detail: fmt.Sprintf("支撑=%.2f（20日低）压力=%.2f（120日高），现价 %.2f 已突破上沿", lv.support, lv.resistance, price),
+			Reason: "突破120日高点，强势；注意回踩确认",
 		}
 	}
 	// 跌破 20 日支撑（现价低于近 20 日全部低点）：破位风险
 	if price < lv.support {
 		return Finding{
 			Analyzer: NameSupport, Title: "支撑压力", Score: -50,
-			Detail: fmt.Sprintf("支撑=%.2f（20日低）压力=%.2f（60日高），现价 %.2f 已跌破支撑", lv.support, lv.resistance, price),
+			Detail: fmt.Sprintf("支撑=%.2f（20日低）压力=%.2f（120日高），现价 %.2f 已跌破支撑", lv.support, lv.resistance, price),
 			Reason: "跌破20日支撑位，破位下行风险",
 		}
 	}
@@ -379,7 +388,7 @@ func runSupport(klines []model.Kline, price float64, lv levels) Finding {
 	}
 	return Finding{
 		Analyzer: NameSupport, Title: "支撑压力", Score: score,
-		Detail: fmt.Sprintf("支撑=%.2f（20日低）压力=%.2f（60日高），现价 %.2f 处于区间 %.0f%%", lv.support, lv.resistance, price, pos),
+		Detail: fmt.Sprintf("支撑=%.2f（20日低）压力=%.2f（120日高），现价 %.2f 处于区间 %.0f%%", lv.support, lv.resistance, price, pos),
 		Reason: strings.Join(tags, "，"),
 	}
 }

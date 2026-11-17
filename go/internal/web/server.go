@@ -82,6 +82,7 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	s.mux.HandleFunc("GET /api/boards", s.handleBoards)
 	s.mux.HandleFunc("GET /api/stocks", s.handleStocks)
 	s.mux.HandleFunc("GET /api/stocks/search", s.handleStockSearch)
+	s.mux.HandleFunc("GET /api/f10", s.handleStockF10)
 	s.mux.HandleFunc("GET /api/etfs", s.handleETFs)
 	s.mux.HandleFunc("GET /api/etf-quotes", s.handleETFQuotes)
 	s.mux.HandleFunc("GET /api/etf-groups", s.handleETFGroups)
@@ -241,7 +242,7 @@ func isUSSecid(secid string) bool {
 	return strings.HasPrefix(secid, "105.") || strings.HasPrefix(secid, "106.") || strings.HasPrefix(secid, "107.")
 }
 
-// handleKline GET /api/kline?secid=1.000001&limit=120 — 日 K 走势。
+// handleKline GET /api/kline?secid=1.000001&limit=250 — 日 K 走势。
 // 板块 secid（pt 前缀）走腾讯；其余按路由顺序尝试（kline 功能默认前复权源优先）。
 // 美股 secid 固定东财（新浪 getKLineData 仅支持 sh/sz）。
 func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +253,7 @@ func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 500 {
-		limit = 120
+		limit = 250
 	}
 
 	// 板块 secid → 腾讯

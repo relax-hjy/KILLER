@@ -90,6 +90,7 @@ cmd/killer/main.go ── 装配
 - `Stock`：个股行情通用结构（A股/美股，含成交额/换手/PE/PB/市值）
 - `WatchStock`：自选个股（含独立阈值）
 - `Holding`：基金持仓明细行（序号/代码/名称/占净值比%/持股数万股/市值万元，2026-11-16 新增）
+- `F10` / `F10MainOp` / `F10Finance`：个股公司基本面——公司全称/行业/简介/经营范围 + 主营构成条目（分类/项目/收入/占比/毛利率）+ 单报告期财报指标 15 字段（营收/净利/扣非及同比、毛利率/净利率/ROE/EPS/每股净资产/资产负债率/经营现金流/总资产，2026-11-17 新增）
 
 ### 内存结构（analysis 包，2026-11-16 新增）
 - `Finding`：单个分析系统结论（analyzer/title/score -100~+100/verdict/detail/reason）
@@ -105,7 +106,7 @@ cmd/killer/main.go ── 装配
 | GET | /api/quotes | 全部指数最新行情（按配置顺序） |
 | GET | /api/history?secid=&hours= | 分时快照（本地轮询落库，默认 4h，上限 7 天，升序；现为辅助/调试用） |
 | GET | /api/intraday?secid= | 当日分时（数据源 1 分钟 K，全天 9:31–15:00，休市/重启可看；分时图数据源） |
-| GET | /api/kline?secid=&limit= | 日 K（默认 120，上限 500，东财独占） |
+| GET | /api/kline?secid=&limit= | 日 K（默认 250，上限 500，东财独占） |
 
 ### 监控模块
 | 方法 | 路径 | 说明 |
@@ -124,6 +125,7 @@ cmd/killer/main.go ── 装配
 | GET | /api/etf-quotes | 监控 ETF 最新行情（按 config.etfs 顺序，看门狗巡检内存态） |
 | GET | /api/etf-groups | 市场 ETF 组合（按 config.etf_groups 分组，汇总 secid 去重后一次腾讯批量拉行情再分组返回，缓存 10s；行情失败降级返回组结构） |
 | GET | /api/etf-holdings?code= | ETF 前十大重仓（东财天天基金 F10 jjcc，最新披露期；code 兼容 6 位基金代码与 secid 形态；缓存 6h 防限流；2026-11-16 新增） |
+| GET | /api/f10?secid= | 个股公司主营+财报（东财 F10 三接口并发：公司概况/主营构成/财报指标，全成功才返回不缓存残缺结果；缓存 30 分钟；secid 白名单与 isAShareSecid 同口径；2026-11-17 新增） |
 | GET | /api/us/overview | 美股三大指数 + SPDR 11 板块一次批量（缓存 10s） |
 | GET | /api/us/stocks?page=&sort=&market= | 美股活跃榜分页（东财独占） |
 | GET | /api/ndx | 纳指100 成分+批量行情（成分缓存 6h，行情 10s；2026-11-13 起由 /us.html 个股区「纳指100 成分」tab 调用，不再有独立页面） |

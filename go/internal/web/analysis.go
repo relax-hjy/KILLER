@@ -68,7 +68,7 @@ func (s *Server) assess(ctx context.Context, secid, name string) (*analysis.Asse
 			return a, nil
 		}
 	}
-	klines, err := trading.LoadKlines(ctx, secid, 120)
+	klines, err := trading.LoadKlines(ctx, secid, 250)
 	if err != nil {
 		return nil, err
 	}

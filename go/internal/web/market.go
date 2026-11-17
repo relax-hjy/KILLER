@@ -5,6 +5,7 @@ package web
 //   GET    /api/board-members?secid=      板块成分股（东财专属）
 //   GET    /api/stocks?page=&sort=&asc=   A股个股分页（默认按总市值降序）
 //   GET    /api/stocks/search?q=&n=       A股个股全市场关键词搜索
+//   GET    /api/f10?secid=                个股公司主营 + 财报（东财 F10）
 //   GET    /api/us/overview               美股三大指数 + SPDR 板块
 //   GET    /api/us/stocks?page=&market=   美股个股分页
 //   GET    /api/ndx                       纳指100成分+行情
@@ -167,6 +168,24 @@ func (s *Server) searchStocks(ctx context.Context, q string, n int) ([]model.Sto
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// handleStockF10 GET /api/f10?secid=1.600519 — 公司主营与财报（东财 F10 三接口）。
+// 基本面按季度变化，30 分钟缓存；source 层三接口全成功才返回，限流期报错不缓存残缺结果。
+func (s *Server) handleStockF10(w http.ResponseWriter, r *http.Request) {
+	secid := r.URL.Query().Get("secid")
+	if secid == "" {
+		http.Error(w, "missing secid", http.StatusBadRequest)
+		return
+	}
+	v, err := marketCache.GetOrSet("f10:"+secid, 30*time.Minute, func() (any, error) {
+		return source.FetchF10(r.Context(), secid)
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, v)
 }
 
 // handleETFs GET /api/etfs?page=1&sort=f3&asc=0 — 全市场 ETF 分页（东财 clist）。

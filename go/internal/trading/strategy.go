@@ -54,7 +54,7 @@ func StrategyName(name string) string {
 // LoadKlines 加载标的日K（供信号与回测共用）。
 func LoadKlines(ctx context.Context, secid string, limit int) ([]model.Kline, error) {
 	if limit <= 0 || limit > 500 {
-		limit = 120
+		limit = 250
 	}
 	if source.IsBoardSecid(secid) {
 		// 板块走腾讯
@@ -82,7 +82,7 @@ func LoadKlines(ctx context.Context, secid string, limit int) ([]model.Kline, er
 // Generate 生成单个标的的策略信号。返回 action: buy/sell/hold。
 func Generate(ctx context.Context, name, secid, displayName string) (*model.Signal, error) {
 	params := DefaultParams(name)
-	klines, err := LoadKlines(ctx, secid, 120)
+	klines, err := LoadKlines(ctx, secid, 250)
 	if err != nil {
 		return nil, err
 	}
