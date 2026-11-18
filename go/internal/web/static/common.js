@@ -5,6 +5,12 @@ const $ = id => document.getElementById(id);
 const cls = v => v > 0 ? "up" : (v < 0 ? "down" : "flat");
 const pctStr = v => (v > 0 ? "+" : "") + Number(v).toFixed(2) + "%";
 const fmt = (v, d = 2) => (v == null || v === 0 && d === 0) ? "—" : Number(v).toFixed(d);
+// 价位：四舍五入到 3 位（ETF 最小变动 0.001），第 3 位为 0 时只显示 2 位，兼顾低价 ETF 与普通股票
+const fmtPrice = v => {
+  if (v == null) return "—";
+  const r = Math.round(v * 1000) / 1000;
+  return Math.abs(r * 100 - Math.round(r * 100)) < 1e-9 ? r.toFixed(2) : r.toFixed(3);
+};
 const fmtCap = v => { // 市值：亿
   if (!v) return "—";
   if (v >= 1e12) return (v / 1e12).toFixed(2) + "万亿";

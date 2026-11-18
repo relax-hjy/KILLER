@@ -78,7 +78,7 @@ func guideHolding(a *analysis.Assessment, qty int64, price, avgCost, mv, total, 
 	// 分批止盈：贴近压力位且有浮盈，先落袋一半，剩余守止损（不做一把梭的清仓建议）
 	if a.Resistance > 0 && price >= a.Resistance*0.98 && price > avgCost {
 		if n := halfLot(qty, lot); n > 0 {
-			return actTake, n, price, "现价贴近压力位 " + f1(a.Resistance) + "，先止盈一半落袋，剩余守止损等突破"
+			return actTake, n, price, "现价贴近压力位 " + fp(a.Resistance) + "，先止盈一半落袋，剩余守止损等突破"
 		}
 	}
 	if mv > singleCap {
@@ -140,18 +140,18 @@ func planHolding(a *analysis.Assessment, qty int64, avgCost, price float64, acti
 	if stop > 0 {
 		if price > 0 && price < stop {
 			steps = append(steps, planStep{
-				If:   "现价 " + f1(price) + " 已跌破止损位 " + f1(stop),
+				If:   "现价 " + fp(price) + " 已跌破止损位 " + fp(stop),
 				Then: "立即清仓离场，按纪律执行，不等回本",
 			})
 		} else if avgCost > 0 {
 			risk := (stop - avgCost) / avgCost * 100
 			steps = append(steps, planStep{
-				If:   "跌破止损位 " + f1(stop) + "（较买入价约 " + f1(risk) + "%）",
+				If:   "跌破止损位 " + fp(stop) + "（较买入价约 " + f1(risk) + "%）",
 				Then: "清仓止损，不补仓不摊薄",
 			})
 		} else {
 			steps = append(steps, planStep{
-				If:   "跌破止损位 " + f1(stop),
+				If:   "跌破止损位 " + fp(stop),
 				Then: "清仓止损，不补仓不摊薄",
 			})
 		}
@@ -166,12 +166,12 @@ func planHolding(a *analysis.Assessment, qty int64, avgCost, price float64, acti
 		if n := halfLot(qty, lot); n > 0 {
 			if price > avgCost && price >= a.Resistance*0.98 {
 				steps = append(steps, planStep{
-					If:   "现价已贴近压力位 " + f1(a.Resistance),
+					If:   "现价已贴近压力位 " + fp(a.Resistance),
 					Then: "止盈一半（" + strconv.FormatInt(n, 10) + " 股）先落袋，剩余仓位守止损等突破",
 				})
 			} else {
 				steps = append(steps, planStep{
-					If:   "涨到压力位 " + f1(a.Resistance),
+					If:   "涨到压力位 " + fp(a.Resistance),
 					Then: "止盈一半（" + strconv.FormatInt(n, 10) + " 股）先落袋，剩余守止损",
 				})
 			}
@@ -181,17 +181,17 @@ func planHolding(a *analysis.Assessment, qty int64, avgCost, price float64, acti
 		switch {
 		case action == actAdd && suggestQty > 0:
 			steps = append(steps, planStep{
-				If:   "回踩支撑位 " + f1(a.Support) + " 附近企稳（不破）",
+				If:   "回踩支撑位 " + fp(a.Support) + " 附近企稳（不破）",
 				Then: "可加仓 " + strconv.FormatInt(suggestQty, 10) + " 股，加仓部分同样守止损",
 			})
 		case price > 0 && price < a.Support:
 			steps = append(steps, planStep{
-				If:   "跌破支撑位 " + f1(a.Support) + " 但未到止损",
+				If:   "跌破支撑位 " + fp(a.Support) + " 但未到止损",
 				Then: "暂停加仓，观察能否收回；再破止损位直接走",
 			})
 		default:
 			steps = append(steps, planStep{
-				If:   "回踩支撑位 " + f1(a.Support) + " 附近企稳",
+				If:   "回踩支撑位 " + fp(a.Support) + " 附近企稳",
 				Then: "才是加仓位置，冲高时不追",
 			})
 		}
@@ -207,9 +207,19 @@ func planHolding(a *analysis.Assessment, qty int64, avgCost, price float64, acti
 	return steps
 }
 
-// f1 保留 1 位小数拼字符串（拼 reason 用）。
+// f1 保留 1 位小数拼字符串（拼百分比/金额/评分类文案用）。
 func f1(v float64) string {
 	return strconv.FormatFloat(math.Round(v*10)/10, 'f', 1, 64)
+}
+
+// fp 价位拼字符串：四舍五入到 3 位（ETF 最小变动 0.001），第 3 位为 0 时只显示 2 位。
+// 低价 ETF 用 f1 会把 0.55 的止损和 0.60 的支撑都渲染成"0.6"，两个价位撞车。
+func fp(v float64) string {
+	r := math.Round(v*1000) / 1000
+	if math.Abs(r*100-math.Round(r*100)) < 1e-9 {
+		return strconv.FormatFloat(r, 'f', 2, 64)
+	}
+	return strconv.FormatFloat(r, 'f', 3, 64)
 }
 
 type guidanceHolding struct {
@@ -445,13 +455,13 @@ func (s *Server) guideCandidates(ctx context.Context, group string, n int, singl
 		g.StopLoss = a.StopLossAt(px) // 计划价口径：用现价算的止损会高于回踩买入价
 		g.Reason = "评分 " + f1(a.Score) + " · " + a.Advice
 		if a.Support > 0 && q.Price > a.Support*1.05 {
-			g.Reason += "；现价高于支撑 5%+，等回踩到 " + f1(px) + " 再接"
+			g.Reason += "；现价高于支撑 5%+，等回踩到 " + fp(px) + " 再接"
 		}
 		if g.StopLoss > 0 {
-			g.Reason += "；止损 " + f1(g.StopLoss)
+			g.Reason += "；止损 " + fp(g.StopLoss)
 		}
 		if a.Resistance > 0 {
-			g.Reason += "；目标位 " + f1(a.Resistance) + "，到位先止盈一半"
+			g.Reason += "；目标位 " + fp(a.Resistance) + "，到位先止盈一半"
 		}
 		out = append(out, g)
 		deployable -= amount

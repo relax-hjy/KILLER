@@ -109,11 +109,11 @@ func TestAssessLevels(t *testing.T) {
 			hi120 = k.High
 		}
 	}
-	if a.Support != round2(lo20) {
-		t.Errorf("支撑位应为近20日最低 %.2f，实际 %.2f", lo20, a.Support)
+	if a.Support != round3(lo20) {
+		t.Errorf("支撑位应为近20日最低 %.3f，实际 %.3f", lo20, a.Support)
 	}
-	if a.Resistance != round2(hi120) {
-		t.Errorf("压力位应为近120日最高 %.2f，实际 %.2f", hi120, a.Resistance)
+	if a.Resistance != round3(hi120) {
+		t.Errorf("压力位应为近120日最高 %.3f，实际 %.3f", hi120, a.Resistance)
 	}
 }
 
@@ -187,7 +187,7 @@ func TestStopLossClamp(t *testing.T) {
 func TestStopLossAt(t *testing.T) {
 	a := &Assessment{Support: 11.0, Atr: 0.15}
 	// 现价口径（12.26）：max(10.85, 11.885) ≈ 11.89 —— 高于回踩买入价 11.44，成交即贴损
-	nowStop := round2(stopLossOf(12.26, levels{support: a.Support, atr: a.Atr}))
+	nowStop := round3(stopLossOf(12.26, levels{support: a.Support, atr: a.Atr}))
 	if nowStop < 11.44 {
 		t.Fatalf("本用例想演示现价口径止损高于买入价，实际 %.2f", nowStop)
 	}

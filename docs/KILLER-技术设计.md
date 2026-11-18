@@ -94,7 +94,7 @@ cmd/killer/main.go ── 装配
 
 ### 内存结构（analysis 包，2026-11-16 新增）
 - `Finding`：单个分析系统结论（analyzer/title/score -100~+100/verdict/detail/reason）
-- `Assessment`：综合研判结论（score 0-100、advice 五档、summary、support/resistance/stop_loss、findings[5]、KlineCount/KlineDate）
+- `Assessment`：综合研判结论（score 0-100、advice 五档、summary、support/resistance/stop_loss、findings[5]、KlineCount/KlineDate）；support/resistance/stop_loss/atr 保留 3 位小数（ETF 最小变动 0.001，2026-11-18 由 round2 改 round3，订单限价 buyPrice 仍 round2 防非法报价）
 - 合成权重：趋势 0.30 / 动量 0.25 / 量价 0.20 / 支撑压力 0.15 / 波动风险 0.10；评分→建议五档：≥80 可积极买入、≥65 可以买入、≥50 观望回踩、≥35 偏弱暂缓、其余回避
 - 关键位：支撑=近 20 日最低，压力=近 60 日最高，止损=支撑-1×ATR14 且不深于现价 -8%；现价 < 支撑判破位（-50）
 

@@ -11,6 +11,7 @@ package analysis
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -135,10 +136,10 @@ func Assess(secid, name string, klines []model.Kline, price, pct float64) (*Asse
 		Score:       round1(score),
 		Advice:      adviceOf(score),
 		Summary:     summaryOf(score, findings),
-		Support:     round2(lv.support),
-		Resistance:  round2(lv.resistance),
-		StopLoss:    round2(stopLossOf(price, lv)),
-		Atr:         round2(lv.atr),
+		Support:     round3(lv.support),
+		Resistance:  round3(lv.resistance),
+		StopLoss:    round3(stopLossOf(price, lv)),
+		Atr:         round3(lv.atr),
 		Confidence:  round1(confidenceOf(len(klines))),
 		Findings:    findings,
 		KlineCount:  len(klines),
@@ -226,7 +227,7 @@ func stopLossOf(price float64, lv levels) float64 {
 // StopLossAt 以指定买入价为基准的参考止损位。
 // "等回踩再接"的限价计划必须锚定买入价——用现价算的止损高于回踩买入价，一成交就贴着止损。
 func (a *Assessment) StopLossAt(entry float64) float64 {
-	return round2(stopLossOf(entry, levels{support: a.Support, atr: a.Atr}))
+	return round3(stopLossOf(entry, levels{support: a.Support, atr: a.Atr}))
 }
 
 // runTrend 趋势分析：均线排列（35）+ 价与 MA20 位置（20）+ MA20 斜率（20）+ 价与 MA60 位置（10）+ 价与年线 MA250 位置（15）。
@@ -816,4 +817,9 @@ func round1(v float64) float64 {
 
 func round2(v float64) float64 {
 	return float64(int64(v*100+0.5)) / 100
+}
+
+// round3 保留 3 位小数：ETF 价位最小变动 0.001，round2 会把 0.566 的止损截成 0.57。
+func round3(v float64) float64 {
+	return math.Round(v*1000) / 1000
 }

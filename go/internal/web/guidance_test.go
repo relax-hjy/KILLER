@@ -6,6 +6,27 @@ import (
 	"killer/internal/analysis"
 )
 
+// TestFp 价位文案口径：四舍五入到 3 位、第 3 位为 0 只显示 2 位——
+// 低价 ETF 的 0.55 止损不能被压成"0.6"（与 0.60 的支撑撞车），整数价位保 2 位不掉精度。
+func TestFp(t *testing.T) {
+	cases := []struct {
+		v    float64
+		want string
+	}{
+		{0.5499, "0.55"},
+		{0.566, "0.566"},
+		{0.641, "0.641"},
+		{95, "95.00"},
+		{110, "110.00"},
+		{80.4359, "80.436"},
+	}
+	for _, c := range cases {
+		if got := fp(c.v); got != c.want {
+			t.Errorf("fp(%v) = %q, want %q", c.v, got, c.want)
+		}
+	}
+}
+
 // TestBuyQty 买入数量按整手折算，占用资金含佣金、不超预算；高低价股都要能买得起。
 func TestBuyQty(t *testing.T) {
 	const lot = 100
@@ -134,13 +155,13 @@ func TestPlanHolding(t *testing.T) {
 	if len(steps) < 3 {
 		t.Fatalf("正常持仓应有止损/止盈/支撑/环境至少 4 条，实际 %d: %+v", len(steps), steps)
 	}
-	if steps[0].If != "跌破止损位 95.0（较买入价约 -5.0%）" {
+	if steps[0].If != "跌破止损位 95.00（较买入价约 -5.0%）" {
 		t.Errorf("第一条应是止损线，实际 %+v", steps[0])
 	}
 	if steps[0].Then != "清仓止损，不补仓不摊薄" {
 		t.Errorf("止损动作应是清仓，实际 %+v", steps[0])
 	}
-	if got := steps[1].If; got != "涨到压力位 110.0" {
+	if got := steps[1].If; got != "涨到压力位 110.00" {
 		t.Errorf("第二条应是压力位止盈，实际 %q", got)
 	}
 	if steps[len(steps)-1].Then == "" {
@@ -161,7 +182,7 @@ func TestPlanHolding(t *testing.T) {
 	add := planHolding(base(), 200, 100, 100, actAdd, 100, lot)
 	found := false
 	for _, s := range add {
-		if s.If == "回踩支撑位 95.0 附近企稳（不破）" && s.Then == "可加仓 100 股，加仓部分同样守止损" {
+		if s.If == "回踩支撑位 95.00 附近企稳（不破）" && s.Then == "可加仓 100 股，加仓部分同样守止损" {
 			found = true
 		}
 	}
@@ -172,7 +193,7 @@ func TestPlanHolding(t *testing.T) {
 	// 持仓不足一手半 → 不给止盈线（halfLot=0）
 	small := planHolding(base(), 100, 100, 100, actHold, 0, lot)
 	for _, s := range small {
-		if s.If == "涨到压力位 110.0" {
+		if s.If == "涨到压力位 110.00" {
 			t.Errorf("一手持仓不应给止盈一半预案: %+v", small)
 		}
 	}

@@ -271,7 +271,7 @@ async function loadPending() {
       <td>${o.id}</td>
       <td>${o.name} <span style="color:var(--muted);font-size:11px">${o.code}</span></td>
       <td class="${o.side === "buy" ? "up" : "down"}">${o.side === "buy" ? "买入" : "卖出"}</td>
-      <td class="num">${fmt(o.price)}</td>
+      <td class="num">${fmtPrice(o.price)}</td>
       <td class="num">${o.quantity}</td>
       <td style="color:var(--muted)">${new Date(o.created_at).toLocaleString("zh-CN", { hour12: false })}</td>
       <td><button class="btn small" onclick="cancelOrder(${o.id})">撤销</button></td>
@@ -301,8 +301,8 @@ async function loadPositions() {
       <td>${p.code}</td>
       <td>${p.name}</td>
       <td class="num">${p.quantity}</td>
-      <td class="num">${fmt(p.avg_cost)}</td>
-      <td class="num">${fmt(p.last_price)}</td>
+      <td class="num">${fmtPrice(p.avg_cost)}</td>
+      <td class="num">${fmtPrice(p.last_price)}</td>
       <td class="num">${fmtMoney(p.market_value)}</td>
       <td class="${p.profit >= 0 ? "up" : "down"}">${p.profit >= 0 ? "+" : ""}${fmtMoney(p.profit)}</td>
       <td class="${p.profit_pct >= 0 ? "up" : "down"}">${p.profit_pct >= 0 ? "+" : ""}${p.profit_pct.toFixed(2)}%</td>
@@ -321,9 +321,9 @@ async function loadOrders() {
       <td>${o.name} <span style="color:var(--muted);font-size:11px">${o.code}</span></td>
       <td class="${o.side === "buy" ? "up" : "down"}">${o.side === "buy" ? "买入" : "卖出"}</td>
       <td>${o.order_type === "market" ? "市价" : "限价"}</td>
-      <td class="num">${fmt(o.price)}</td>
+      <td class="num">${fmtPrice(o.price)}</td>
       <td class="num">${o.quantity}</td>
-      <td class="num">${o.filled_qty > 0 ? fmt(o.filled_price) : "—"}</td>
+      <td class="num">${o.filled_qty > 0 ? fmtPrice(o.filled_price) : "—"}</td>
       <td>${orderStatus(o.status)}</td>
       <td style="color:var(--muted)">${new Date(o.created_at).toLocaleString("zh-CN", { hour12: false })}</td>
     </tr>`).join("") || `<tr><td colspan="9" class="empty">暂无订单</td></tr>`;
@@ -338,7 +338,7 @@ async function loadTrades() {
     $("tradesBody").innerHTML = trades.map(t => `<tr>
       <td>${t.name} <span style="color:var(--muted);font-size:11px">${t.code}</span></td>
       <td class="${t.side === "buy" ? "up" : "down"}">${t.side === "buy" ? "买入" : "卖出"}</td>
-      <td class="num">${fmt(t.price)}</td>
+      <td class="num">${fmtPrice(t.price)}</td>
       <td class="num">${t.quantity}</td>
       <td class="num">${fmtMoney(t.amount)}</td>
       <td class="num">${fmt(t.fee)}</td>
@@ -371,7 +371,7 @@ async function loadSignals() {
           <td>${t.name}</td>
           <td style="color:var(--muted)">${t.type}</td>
           <td><span class="sig-badge sig-${sig.action}">${sigAction(sig.action)}</span></td>
-          <td class="num">${fmt(sig.price)}</td>
+          <td class="num">${fmtPrice(sig.price)}</td>
           <td style="color:var(--muted)">${sig.reason || ""}</td>
         </tr>`);
       } catch (e) {
@@ -434,7 +434,7 @@ function renderBacktest(r) {
   $("btTradesBody").innerHTML = r.trades.map(t => `<tr>
     <td style="color:var(--muted)">${t.traded_at ? new Date(t.traded_at).toLocaleDateString("zh-CN") : ""}</td>
     <td class="${t.side === "buy" ? "up" : "down"}">${t.side === "buy" ? "买入" : "卖出"}</td>
-    <td class="num">${fmt(t.price)}</td>
+    <td class="num">${fmtPrice(t.price)}</td>
     <td class="num">${t.quantity}</td>
     <td class="num">${fmtMoney(t.amount)}</td>
   </tr>`).join("") || `<tr><td colspan="5" class="empty">无交易</td></tr>`;
@@ -509,14 +509,14 @@ function renderGuidance(r) {
   $("guideHold").innerHTML = (r.holdings || []).map(h => `<tr>
     <td>${h.name} <span style="color:var(--muted);font-size:11px">${h.code}</span></td>
     <td class="num">${h.qty}</td>
-    <td class="num">${fmt(h.avg_cost)}</td>
-    <td class="num">${fmt(h.price)}</td>
+    <td class="num">${fmtPrice(h.avg_cost)}</td>
+    <td class="num">${fmtPrice(h.price)}</td>
     <td class="${h.profit >= 0 ? "up" : "down"}">${h.profit >= 0 ? "+" : ""}${fmtMoney(h.profit)}</td>
     <td class="num">${h.weight_pct.toFixed(1)}%</td>
     <td><span class="sig-badge ${h.score >= 65 ? "sig-buy" : (h.score >= 50 ? "sig-hold" : "sig-sell")}">${fmt(h.score, 1)} ${h.advice}</span></td>
     <td><span class="act ${actCls(h.action)}">${h.action}</span>${h.suggest_qty ? " " + h.suggest_qty + " 股" : ""}</td>
-    <td class="num">${h.suggest_qty ? fmt(h.suggest_price) : "—"}</td>
-    <td class="num">${h.stop_loss ? fmt(h.stop_loss) : "—"}</td>
+    <td class="num">${h.suggest_qty ? fmtPrice(h.suggest_price) : "—"}</td>
+    <td class="num">${h.stop_loss ? fmtPrice(h.stop_loss) : "—"}</td>
     <td class="g-reason">${h.reason}</td>
   </tr>`).join("") || `<tr><td colspan="11" class="empty">暂无持仓 — 在下方导入期初持仓，或到「交易下单」买入</td></tr>`;
 
@@ -528,13 +528,13 @@ function renderGuidance(r) {
 
   $("guideCand").innerHTML = (r.candidates || []).map((c, i) => `<tr>
     <td>${c.name} <span style="color:var(--muted);font-size:11px">${c.code}</span></td>
-    <td class="num">${fmt(c.price)}</td>
+    <td class="num">${fmtPrice(c.price)}</td>
     <td class="num">${fmt(c.score, 1)}</td>
-    <td class="num">${fmt(c.suggest_price)}</td>
+    <td class="num">${fmtPrice(c.suggest_price)}</td>
     <td class="num">${c.suggest_qty}</td>
     <td class="num">${fmtMoney(c.amount)}</td>
-    <td class="num">${c.stop_loss ? fmt(c.stop_loss) : "—"}</td>
-    <td class="num">${c.resistance ? fmt(c.resistance) : "—"}</td>
+    <td class="num">${c.stop_loss ? fmtPrice(c.stop_loss) : "—"}</td>
+    <td class="num">${c.resistance ? fmtPrice(c.resistance) : "—"}</td>
     <td class="g-reason">${c.reason}</td>
     <td><button class="btn small" onclick='preFillOrder(${JSON.stringify(JSON.stringify({ secid: c.secid, code: c.code, name: c.name, price: c.suggest_price, qty: c.suggest_qty }))})'>去下单</button></td>
   </tr>`).join("") || `<tr><td colspan="10" class="empty">暂无买得起的候选（可用现金不足一手，或该组评分都不够）</td></tr>`;
