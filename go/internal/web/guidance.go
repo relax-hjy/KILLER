@@ -223,26 +223,26 @@ func fp(v float64) string {
 }
 
 type guidanceHolding struct {
-	SecID       string  `json:"secid"`
-	Code        string  `json:"code"`
-	Name        string  `json:"name"`
-	Qty         int64   `json:"qty"`
-	AvgCost     float64 `json:"avg_cost"`
-	Price       float64 `json:"price"`
-	Pct         float64 `json:"pct"`
-	MarketValue float64 `json:"market_value"`
-	WeightPct   float64 `json:"weight_pct"`
-	Profit      float64 `json:"profit"`
-	Score       float64 `json:"score"`
-	Advice      string  `json:"advice"`
-	Action      string  `json:"action"`
-	SuggestQty  int64   `json:"suggest_qty"`
-	SuggestPrice float64 `json:"suggest_price"`
-	Support     float64 `json:"support"`
-	Resistance  float64 `json:"resistance"`
-	StopLoss    float64 `json:"stop_loss"`
-	Reason      string  `json:"reason"`
-	Plan        []planStep `json:"plan"` // 应对预案：如果…就…（止损/止盈/加仓/环境）
+	SecID        string     `json:"secid"`
+	Code         string     `json:"code"`
+	Name         string     `json:"name"`
+	Qty          int64      `json:"qty"`
+	AvgCost      float64    `json:"avg_cost"`
+	Price        float64    `json:"price"`
+	Pct          float64    `json:"pct"`
+	MarketValue  float64    `json:"market_value"`
+	WeightPct    float64    `json:"weight_pct"`
+	Profit       float64    `json:"profit"`
+	Score        float64    `json:"score"`
+	Advice       string     `json:"advice"`
+	Action       string     `json:"action"`
+	SuggestQty   int64      `json:"suggest_qty"`
+	SuggestPrice float64    `json:"suggest_price"`
+	Support      float64    `json:"support"`
+	Resistance   float64    `json:"resistance"`
+	StopLoss     float64    `json:"stop_loss"`
+	Reason       string     `json:"reason"`
+	Plan         []planStep `json:"plan"` // 应对预案：如果…就…（止损/止盈/加仓/环境）
 }
 
 type guidanceCandidate struct {
@@ -328,7 +328,7 @@ func (s *Server) handleTradeGuidance(w http.ResponseWriter, r *http.Request) {
 			holdings = append(holdings, h)
 			continue
 		}
-		a = gatedCopy(a) // 闸门在副本上改，别污染共享缓存
+		a = gatedCopy(a)           // 闸门在副本上改，别污染共享缓存
 		s.applyQualityGate(ctx, a) // 持仓决策要过财报闸门（指导只涉少量标的，拉 F10 无压力）
 		h.Score, h.Advice = a.Score, a.Advice
 		h.Pct, h.Support, h.Resistance, h.StopLoss = a.Pct, a.Support, a.Resistance, a.StopLoss
@@ -337,7 +337,7 @@ func (s *Server) handleTradeGuidance(w http.ResponseWriter, r *http.Request) {
 			cfg.CommissionRate, cfg.MinCommission)
 		h.Plan = planHolding(a, p.Quantity, p.AvgCost, p.LastPrice, h.Action, h.SuggestQty, lot)
 		if h.Action == actAdd {
-			h.StopLoss = a.StopLossAt(h.SuggestPrice) // 加仓计划的止损锚定建议买入价
+			h.StopLoss = a.StopLossAt(h.SuggestPrice)            // 加仓计划的止损锚定建议买入价
 			deployable -= h.SuggestPrice * float64(h.SuggestQty) // 加仓占用的预算不再给候选
 		}
 		if h.Action == actTake {
@@ -436,7 +436,7 @@ func (s *Server) guideCandidates(ctx context.Context, group string, n int, singl
 		if aErr != nil {
 			continue
 		}
-		a = gatedCopy(a) // 闸门在副本上改，别污染共享缓存
+		a = gatedCopy(a)           // 闸门在副本上改，别污染共享缓存
 		s.applyQualityGate(ctx, a) // 候选买入要过财报闸门
 		if a.Advice != "可以买入" && a.Advice != "观望，回踩支撑再介入" {
 			continue // 闸门降档后不再建议买入

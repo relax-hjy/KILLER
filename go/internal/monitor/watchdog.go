@@ -183,6 +183,7 @@ func (w *Watchdog) fetchQuotes(ctx context.Context) ([]model.Quote, error) {
 			}
 			quotes, err := src.FetchQuotes(ctx, idxSecids)
 			if err == nil {
+				source.MarkUsed(source.FeatQuotes, src.Name())
 				out = append(out, quotes...)
 				lastErr = nil
 				break
@@ -268,6 +269,11 @@ func (w *Watchdog) CheckOnce(ctx context.Context) []model.Alert {
 		if err := w.store.SaveQuote(q); err != nil {
 			log.Printf("[Watchdog] 快照落库失败 %s: %v", q.SecID, err)
 		}
+	}
+
+	// 告警总开关关闭：行情轮询与快照照常，但不进入阈值比对与自选巡检
+	if !w.cfg.Monitoring.Alert.Enabled {
+		return nil
 	}
 
 	// 非交易时段且配置要求仅交易时段 → 只存快照不告警
@@ -492,15 +498,16 @@ func (w *Watchdog) Status() map[string]any {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return map[string]any{
-		"primary":       w.primary.Name(),
-		"fallback":      w.fallbackName(),
-		"last_error":    w.lastErr,
-		"interval_sec":  w.cfg.Monitoring.CheckIntervalSec,
-		"trading_hours": MarketOpen(time.Now()),
-		"monitored":     len(w.cfg.Indices),
-		"boards":        len(w.cfg.Boards),
-		"etfs":          len(w.cfg.ETFs),
-		"globals":       len(w.cfg.Globals),
+		"primary":        w.primary.Name(),
+		"fallback":       w.fallbackName(),
+		"last_error":     w.lastErr,
+		"interval_sec":   w.cfg.Monitoring.CheckIntervalSec,
+		"trading_hours":  MarketOpen(time.Now()),
+		"alerts_enabled": w.cfg.Monitoring.Alert.Enabled,
+		"monitored":      len(w.cfg.Indices),
+		"boards":         len(w.cfg.Boards),
+		"etfs":           len(w.cfg.ETFs),
+		"globals":        len(w.cfg.Globals),
 	}
 }
 

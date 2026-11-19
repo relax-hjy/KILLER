@@ -29,6 +29,7 @@
   <section class="panel" style="margin-top:20px">
     <div class="chartbox-head">
       <h2 id="chartTitle">走势图</h2>
+      <span id="chartSrc" class="src-tag" data-feat="intraday"></span>
       <div class="tabs">
         <button id="tabIntraday" class="on" onclick="switchTab('intraday')">当日分时</button>
         <button id="tabKline" onclick="switchTab('kline')">日 K（250日）</button>
@@ -38,7 +39,7 @@
   </section>
 
   <section class="panel" style="margin-top:20px">
-    <h2>告警记录 <span class="hint">（涨跌幅 / 振幅阈值 + 持仓止损止盈 / 大盘转弱，含冷却）</span></h2>
+    <h2>告警记录 <span class="hint">（涨跌幅 / 振幅阈值 + 持仓止损止盈 / 大盘转弱，含冷却）</span><span class="badge paused" id="alertPaused" style="display:none" title="config.yaml monitoring.alert.enabled=false：暂停期间只轮询行情与落库快照，不产生新告警">已暂停</span><span class="src-tag local" title="监控引擎按阈值与行情自动计算，记录存于本地数据库">来源：本地生成</span></h2>
     <table>
       <thead><tr><th>时间</th><th>名称</th><th>类型</th><th>触发值</th><th>阈值</th><th>点位</th></tr></thead>
       <tbody id="alertBody"></tbody>
@@ -47,7 +48,7 @@
   </section>
 </main>
 
-<footer>数据来源：东方财富 / 新浪财经（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+<footer>数据来源：东方财富 / 新浪财经 / 腾讯财经（指数·板块·ETF·全球按类型分源，失败自动切换）· 告警记录为本地生成 · 仅供学习研究，不构成投资建议</footer>
 
 <script src="/common.js"></script>
 <script>
@@ -82,6 +83,20 @@ function orderedQuotes() {
 }
 
 /* ---------- 指数/全球卡片 ---------- */
+// isETFCardSecid 与后端 IsETFSecid 同口径（沪 51x/56x/563/588、深 159/150/152）
+function isETFCardSecid(secid) {
+  if (!secid.startsWith("1.") && !secid.startsWith("0.")) return false;
+  return ["510","511","512","513","515","516","517","518","560","561","562","563","588","159","150","152"]
+    .includes(secid.slice(2, 5));
+}
+// quoteSrcTag 卡片来源：与看门狗取数通道一致（板块/港股→腾讯、全球→新浪、
+// ETF→批量行情路由、指数→指数行情路由，后两者按实际使用源动态绘制）
+function quoteSrcTag(secid) {
+  if (secid.startsWith("pt")) return `<span class="src-tag">来源：腾讯财经</span>`;
+  if (secid.startsWith("znb_") || secid.startsWith("hf_")) return `<span class="src-tag">来源：新浪财经</span>`;
+  if (/^hk[A-Z]/.test(secid)) return `<span class="src-tag">来源：腾讯财经</span>`;
+  return srcTagHTML(isETFCardSecid(secid) ? "batch" : "quotes");
+}
 function cardHTML(x, i) {
   return `
     <div class="card ${x.secid === STATE.secid ? "active" : ""}"
@@ -91,6 +106,7 @@ function cardHTML(x, i) {
       <div class="price ${cls(x.pct)}">${fmt(x.price)}</div>
       <div class="delta ${cls(x.pct)}">${x.change >= 0 ? "+" : ""}${fmt(x.change)}　${pctStr(x.pct)}</div>
       <div class="sub"><span>高 ${fmt(x.high)}</span><span>低 ${fmt(x.low)}</span><span>振幅 ${fmt(x.amplitude)}%</span></div>
+      <div class="card-src">${quoteSrcTag(x.secid)}</div>
     </div>`;
 }
 
@@ -210,6 +226,15 @@ function drawChart() {
   const cur = findQuote(STATE.secid);
   $("chartTitle").textContent = (cur ? cur.name + " · " : "") +
     (STATE.tab === "intraday" ? "当日分时走势" : "日 K 收盘走势（250日）");
+  // 来源标签跟随当前 tab；全球标的无历史数据时隐藏
+  const srcEl = $("chartSrc");
+  if (isGlobalSecid(STATE.secid)) {
+    srcEl.removeAttribute("data-feat");
+    srcEl.textContent = "";
+  } else {
+    srcEl.dataset.feat = STATE.tab === "kline" ? "kline" : "intraday";
+    paintSrcTags();
+  }
 
   // 全球标的无历史走势数据
   if (isGlobalSecid(STATE.secid)) {
@@ -264,6 +289,7 @@ function renderStatus(s) {
   $("srcState").textContent = `数据源: ${s.primary}` + (s.fallback ? ` → ${s.fallback}` : "");
   $("errState").innerHTML = s.last_error
     ? `<span class="err">⚠ ${s.last_error}</span>` : "";
+  $("alertPaused").style.display = s.alerts_enabled === false ? "inline-flex" : "none";
 }
 
 /* ---------- 轮询 ---------- */

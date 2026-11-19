@@ -28,20 +28,28 @@ var staticFS embed.FS
 
 // Server HTTP 服务。
 type Server struct {
-	cfg           *config.Config
-	wd            *monitor.Watchdog
-	st            *store.Store
-	trade         *trading.Engine
-	acache        *analysisCache // 分析系统结论缓存
-	klineEM       source.Source // 东财 K 线（也是分时唯一源）
-	klineSina     source.Source // 新浪日 K（仅 A 股 sh/sz）
-	klineTencent  source.Source // 腾讯 K 线/分时（板块 pt 代码、美股指数）
-	mux           *http.ServeMux
+	cfg          *config.Config
+	wd           *monitor.Watchdog
+	st           *store.Store
+	trade        *trading.Engine
+	broker       trading.Broker // 下单通道（sim/live 由 trading.mode 决定）
+	acache       *analysisCache // 分析系统结论缓存
+	klineEM      source.Source  // 东财 K 线（也是分时唯一源）
+	klineSina    source.Source  // 新浪日 K（仅 A 股 sh/sz）
+	klineTencent source.Source  // 腾讯 K 线/分时（板块 pt 代码、美股指数）
+	mux          *http.ServeMux
 
 	// 市场环境缓存：批量评估时并发问，互斥锁把请求合并成一次
 	regimeMu  sync.Mutex
 	regimeVal regimeResult
 	regimeAt  time.Time
+
+	// 机会扫描结果缓存（60 秒）：逐只拉日K算信号代价高，短窗复用
+	oppMu    sync.Mutex
+	oppVal   any
+	oppAt    time.Time
+	oppN     int
+	oppGroup string
 }
 
 // New 构建路由。
@@ -69,6 +77,9 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	}
 
 	s := &Server{cfg: cfg, wd: wd, st: st, trade: tradeEng, acache: newAnalysisCache(), klineEM: kl, klineSina: klSina, klineTencent: klTencent, mux: http.NewServeMux()}
+	if tradeEng != nil {
+		s.broker = trading.NewBroker(cfg.Trading.Mode, tradeEng)
+	}
 
 	sub, _ := fs.Sub(staticFS, "static")
 	// 禁缓存：静态页内嵌于二进制，改版后必须让浏览器拿到最新文件
@@ -105,13 +116,16 @@ func New(cfg *config.Config, wd *monitor.Watchdog, st *store.Store) (*Server, er
 	s.mux.HandleFunc("POST /api/datasources/test", s.handleDataSourceTest)
 	s.mux.HandleFunc("GET /api/datasources/routing", s.handleRouting)
 	s.mux.HandleFunc("POST /api/datasources/routing", s.handleRouting)
+	s.mux.HandleFunc("GET /api/datasources/active", s.handleActiveSources)
 
 	// 交易系统
 	if tradeEng != nil {
 		s.mux.HandleFunc("GET /api/trade/account", s.handleTradeAccount)
+		s.mux.HandleFunc("GET /api/trade/mode", s.handleTradeMode)
 		s.mux.HandleFunc("GET /api/trade/positions", s.handleTradePositions)
 		s.mux.HandleFunc("POST /api/trade/positions/import", s.handleTradeImport)
 		s.mux.HandleFunc("GET /api/trade/guidance", s.handleTradeGuidance)
+		s.mux.HandleFunc("GET /api/trade/opportunities", s.handleTradeOpportunities)
 		s.mux.HandleFunc("GET /api/trade/orders", s.handleTradeOrders)
 		s.mux.HandleFunc("POST /api/trade/orders", s.handleTradePlace)
 		s.mux.HandleFunc("DELETE /api/trade/orders", s.handleTradeCancel)
@@ -226,12 +240,20 @@ func (s *Server) handleIntraday(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if source.IsBoardSecid(secid) {
 		klines, err = s.klineTencent.FetchMinuteKline(r.Context(), secid)
+		if err == nil {
+			source.MarkUsed(source.FeatIntraday, s.klineTencent.Name())
+		}
 	} else {
 		// 东财首选；失败降级腾讯（A股/ETF 通吃）
 		klines, err = s.klineEM.FetchMinuteKline(r.Context(), secid)
-		if err != nil {
+		if err == nil {
+			source.MarkUsed(source.FeatIntraday, s.klineEM.Name())
+		} else {
 			log.Printf("[Web] 分时东财失败 %s，降级腾讯: %v", secid, err)
 			klines, err = s.klineTencent.FetchMinuteKline(r.Context(), secid)
+			if err == nil {
+				source.MarkUsed(source.FeatIntraday, s.klineTencent.Name())
+			}
 		}
 	}
 	if err != nil {
@@ -270,6 +292,7 @@ func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
+		source.MarkUsed(source.FeatKline, s.klineTencent.Name())
 		if klines == nil {
 			klines = []model.Kline{}
 		}
@@ -297,6 +320,7 @@ func (s *Server) handleKline(w http.ResponseWriter, r *http.Request) {
 		}
 		klines, err := src.FetchKline(r.Context(), secid, limit)
 		if err == nil {
+			source.MarkUsed(source.FeatKline, src.Name())
 			if klines == nil {
 				klines = []model.Kline{}
 			}

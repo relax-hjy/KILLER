@@ -91,10 +91,10 @@ func bucketOf(score float64) string {
 // 无样本的分层不出现在结果里。
 func Aggregate(evals []RollEval) []BucketStat {
 	type acc struct {
-		n     int
-		win   [3]float64
-		sum   [3]float64
-		cnt   [3]float64 // 该观察期的有效样本数
+		n      int
+		win    [3]float64
+		sum    [3]float64
+		cnt    [3]float64 // 该观察期的有效样本数
 		advice string
 	}
 	order := []string{"≥80", "65-80", "50-65", "35-50", "<35"}

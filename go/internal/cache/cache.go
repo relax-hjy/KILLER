@@ -11,7 +11,7 @@ import (
 
 type entry struct {
 	val any
-	exp  time.Time
+	exp time.Time
 }
 
 // Cache 泛型 TTL 缓存。

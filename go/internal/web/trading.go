@@ -61,7 +61,25 @@ func (s *Server) handleTradeOrders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, orders)
 }
 
-// handleTradePlace POST /api/trade/orders — 下单。
+// handleTradeMode GET /api/trade/mode — 当前交易通道（前端实盘/模拟徽标）。
+func (s *Server) handleTradeMode(w http.ResponseWriter, r *http.Request) {
+	mode := "sim"
+	if s.broker != nil && s.broker.Live() {
+		mode = "live"
+	}
+	writeJSON(w, map[string]any{
+		"mode": mode,
+		"broker": func() string {
+			if s.broker != nil {
+				return s.broker.Name()
+			}
+			return "sim"
+		}(),
+		"live_ready": mode == "live", // live 通道当前为占位，接入券商 API 后改为探测
+	})
+}
+
+// handleTradePlace POST /api/trade/orders — 下单（走 Broker 通道，sim/live 由配置决定）。
 // body: {secid, code, name, side, order_type, price, quantity}
 func (s *Server) handleTradePlace(w http.ResponseWriter, r *http.Request) {
 	var req model.Order
@@ -69,7 +87,7 @@ func (s *Server) handleTradePlace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "非法请求体: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	id, status, err := s.trade.PlaceOrder(r.Context(), req)
+	id, status, err := s.broker.PlaceOrder(r.Context(), req)
 	if err != nil {
 		// 业务拒绝返回 200 + 状态，便于前端展示原因
 		writeJSON(w, map[string]any{"id": id, "status": status, "error": err.Error()})
@@ -85,7 +103,7 @@ func (s *Server) handleTradeCancel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	if err := s.trade.CancelOrder(id); err != nil {
+	if err := s.broker.CancelOrder(id); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

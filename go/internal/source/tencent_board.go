@@ -63,13 +63,13 @@ func tencentGetJSON(ctx context.Context, url string) ([]byte, error) {
 
 // tencentBoardRankItem 板块列表单条（rank/pt/getRank 响应）。
 type tencentBoardRankItem struct {
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	Zxj       string `json:"zxj"` // 板块指数点位
-	Zd        string `json:"zd"`  // 涨跌额
-	Zdf       string `json:"zdf"` // 涨跌幅(%)
-	Zgb       string `json:"zgb"` // 涨跌家数 "涨/跌"
-	Lzg       *struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+	Zxj  string `json:"zxj"` // 板块指数点位
+	Zd   string `json:"zd"`  // 涨跌额
+	Zdf  string `json:"zdf"` // 涨跌幅(%)
+	Zgb  string `json:"zgb"` // 涨跌家数 "涨/跌"
+	Lzg  *struct {
 		Code string `json:"code"`
 		Name string `json:"name"`
 		Zd   string `json:"zd"`
@@ -141,16 +141,16 @@ func parseBoardZgb(s string) (int, int) {
 
 // tencentBoardMemItem 成分股单条。
 type tencentBoardMemItem struct {
-	Code   string `json:"code"`
-	Name   string `json:"name"`
-	Zxj    string `json:"zxj"`  // 现价
-	Zdf    string `json:"zdf"`  // 涨跌幅(%)
-	Zd     string `json:"zd"`   // 涨跌额
-	Hsl    string `json:"hsl"`  // 换手率(%)
-	Ltsz   string `json:"ltsz"` // 流通市值(亿)
-	Zsz    string `json:"zsz"`  // 总市值(亿)
-	PeTTM  string `json:"pe_ttm"`
-	Volume string `json:"volume"`
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	Zxj      string `json:"zxj"`  // 现价
+	Zdf      string `json:"zdf"`  // 涨跌幅(%)
+	Zd       string `json:"zd"`   // 涨跌额
+	Hsl      string `json:"hsl"`  // 换手率(%)
+	Ltsz     string `json:"ltsz"` // 流通市值(亿)
+	Zsz      string `json:"zsz"`  // 总市值(亿)
+	PeTTM    string `json:"pe_ttm"`
+	Volume   string `json:"volume"`
 	Turnover string `json:"turnover"`
 }
 
@@ -227,6 +227,7 @@ func FetchBoardQuotes(ctx context.Context, secids []string) ([]model.Quote, erro
 	if err != nil {
 		return nil, err
 	}
+	MarkUsed(FeatBoards, SrcTencent)
 	now := time.Now()
 	out := make([]model.Quote, 0, len(stocks))
 	for _, st := range stocks {

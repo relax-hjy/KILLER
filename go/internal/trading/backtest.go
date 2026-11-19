@@ -39,10 +39,13 @@ func defaultParams(name string) Params {
 	return DefaultParams(name)
 }
 
-// Backtest 对单个标的运行回测。
-// strategy: ma_cross | breakout | rsi
+// Backtest 对单个标的运行回测。策略取自注册表（见 strategy.go）。
 // 交易规则：满仓进出（全仓买/全仓卖），忽略手续费精度（按 commission_rate 计）。
 func (e *Engine) Backtest(ctx context.Context, name, secid, displayName string, initialCash float64) (*model.BacktestResult, error) {
+	fn := signalFunc(name)
+	if fn == nil {
+		return nil, fmt.Errorf("未知策略: %s", name)
+	}
 	klines, err := loadKlinesForBacktest(ctx, secid)
 	if err != nil {
 		return nil, err
@@ -75,15 +78,7 @@ func (e *Engine) Backtest(ctx context.Context, name, secid, displayName string, 
 	var entryPrice float64 = 0
 
 	for i := 1; i < len(klines); i++ {
-		action := "hold"
-		switch name {
-		case "ma_cross":
-			action, _, _ = maCross(closes[:i+1], params.Short, params.Long)
-		case "breakout":
-			action, _, _ = breakout(closes[:i+1], params.Period)
-		case "rsi":
-			action, _, _ = rsiSignal(closes[:i+1], params.Period)
-		}
+		action, _, _ := fn(closes[:i+1], params)
 
 		px := closes[i]
 		if action == "buy" && cash > px {

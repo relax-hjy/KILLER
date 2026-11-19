@@ -121,7 +121,7 @@ cmd/killer/main.go ── 装配
 | GET | /api/boards?kind=industry\|concept&sort= | A股板块（腾讯首选→新浪/东财兜底，缓存 60s） |
 | GET | /api/board-members?secid= | 板块成分股（腾讯 pt 代码首选，东财 90.BK 兜底） |
 | GET | /api/stocks?page=&sort=&asc= | A股个股分页（每页50，缓存 15s） |
-| GET | /api/etfs?page=&sort=&asc= | A股 ETF 分页（东财 clist 独占，每页50，缓存 15s） |
+| GET | /api/etfs?page=&sort=&asc= | A股 ETF 分页（新浪 etf_hq_fund 首选、东财 clist 兜底，每页50，缓存 15s） |
 | GET | /api/etf-quotes | 监控 ETF 最新行情（按 config.etfs 顺序，看门狗巡检内存态） |
 | GET | /api/etf-groups | 市场 ETF 组合（按 config.etf_groups 分组，汇总 secid 去重后一次腾讯批量拉行情再分组返回，缓存 10s；行情失败降级返回组结构） |
 | GET | /api/etf-holdings?code= | ETF 前十大重仓（东财天天基金 F10 jjcc，最新披露期；code 兼容 6 位基金代码与 secid 形态；缓存 6h 防限流；2026-11-16 新增） |
@@ -151,11 +151,11 @@ cmd/killer/main.go ── 装配
 | GET | /api/datasources/routing | 当前功能→数据源映射 |
 | POST | /api/datasources/routing | 更新路由：校验源是否支持该功能（非法 400）→ 内存热生效 → setting 表持久化 |
 
-**路由机制**：`source` 包维护路由表（RWMutex 保护，可热更新），各功能入口（看门狗指数行情、板块/个股/ETF/批量行情包装函数、日 K handler）按 `pairFor(feature)` 得到「首选→备选」顺序依次尝试。单一来源功能（当日分时/美股活跃榜/成分表/ETF 列表）锁定；美股日 K 因新浪 `getKLineData` 仅支持 sh/sz 而固定东财。启动时 `web.LoadRouting` 从 setting 表恢复。
+**路由机制**：`source` 包维护路由表（RWMutex 保护，可热更新），各功能入口（看门狗指数行情、板块/个股/ETF/批量行情包装函数、日 K handler）按 `pairFor(feature)` 得到「首选→备选」顺序依次尝试。单一来源功能（美股活跃榜/成分表）锁定；美股日 K 因新浪 `getKLineData` 仅支持 sh/sz 而固定东财。启动时 `web.LoadRouting` 从 setting 表恢复。
 
-**默认路由**（2026-11-13 板块彻底脱离东财后调整，`Features[].Sources[0]` 即默认首选）：板块 → 腾讯（列表/行情/成分股/日K/分时全走 pt 代码），日K/个股列表 → 新浪，批量行情 → 腾讯，指数行情 quotes → 东财（指数 push2 可用性优于板块），当日分时 → 东财首选+腾讯兜底（2026-11-13 加，修复东财限流期分时图 502），ETF 列表 → 东财独占，成分表 → yfiua。
+**默认路由**（2026-11-13 板块彻底脱离东财后调整，`Features[].Sources[0]` 即默认首选）：板块 → 腾讯（列表/行情/成分股/日K/分时全走 pt 代码），日K/个股列表 → 新浪，批量行情 → 腾讯，指数行情 quotes → 东财（指数 push2 可用性优于板块），当日分时 → 东财首选+腾讯兜底（2026-11-13 加，修复东财限流期分时图 502），ETF 列表 → 新浪 etf_hq_fund 首选、东财 clist 兜底（2026-11-19 解除东财单点），成分表 → yfiua。
 
-**能力矩阵**（实测边界）：东财 = 除成分表外全部（2026-11-12 实测 push2 连接失败，降为兜底）；新浪 = 指数行情/日K/板块/个股列表/批量行情（无分钟分时、无美股列表、无 100.* 指数、无板块成分股、无 ETF 列表）；腾讯 = 批量行情+板块+分时/K线（列表/行情/成分股/日K/分时，A股/美股/ETF/100.* 指数通吃）；yfiua = 仅纳指100成分。
+**能力矩阵**（实测边界）：东财 = 除成分表外全部（2026-11-12 实测 push2 连接失败，降为兜底）；新浪 = 指数行情/日K/板块/个股列表/批量行情/全市场 ETF 列表（无分钟分时、无美股列表、无 100.* 指数、无板块成分股）；腾讯 = 批量行情+板块+分时/K线（列表/行情/成分股/日K/分时，A股/美股/ETF/100.* 指数通吃；**无基金枚举接口**——rank 服务在线但方法名 `hs/getRankList`/`fund/getRankList` 返回 rpc invalid、`mktHs/rank` 各参数组合 TYPE/ARG_ERROR，2026-11-19 实测未破解）；yfiua = 仅纳指100成分。
 
 前端页面：`/`（大盘）、`/boards.html`、`/stocks.html`、`/etfs.html`（ETF 看板）、`/us.html`（美股全景，2026-11-13 起合并原 `/ndx.html`：三大指数卡片 + SPDR 板块 + 个股区双 tab「成交活跃榜 / 纳指100 成分」共用详情抽屉，`?tab=ndx` 直达成分 tab）、`/analysis.html`（分析系统，2026-11-16 新增：科技股观察列表 + 综合研判详情）、`/trading.html`、`/datasource.html`（数据源看板），统一导航 market.css + common.js。原 `/ndx.html` 已删除（旧链接 404），导航不再单列「纳指100」。
 
@@ -201,7 +201,7 @@ config / model → （无内部依赖）
 - **东方财富 push2 / push2his**：行情 ulist、列表 clist（含 A股/ETF）、日 K/分钟 K kline（2026-11-11 实测通过）；2026-11-12 实测 push2 系列连接失败（http=000/EOF），降为兜底，恢复后自动回到部分首选；ETF 列表 fs=`m:1+t:19,m:0+t:13`（沪 ETF t:19 + 深基金/ETF t:13，深 t:13 含 LOF/开放基金用 IsETFSecid 过滤）
 - **新浪（sina.go / sina_ext.go）**：
   - `hq.sinajs.cn` 批量行情 GBK（sh/sz 个股全字段 + gb_ 美股 + sh510xxx/sz159xxx ETF），A股/美股/ETF 混排实测通过
-  - `Market_Center.getHQNodeData` A股列表（排序+分页，5341 只，注意数值字段 JSON 数字/字符串混排需 flexF 兼容）；ETF 节点（etf_fund/fund_etf 等）实测返回空，新浪不支持 ETF 列表
+  - `Market_Center.getHQNodeData` A股列表（排序+分页，5341 只，注意数值字段 JSON 数字/字符串混排需 flexF 兼容）；ETF 节点 etf_fund/fund_etf 实测返回空（节点名不对），**正确节点 `etf_hq_fund`**（2026-11-19 实测：计数 938/列表实返 927，沪 559 深 368 含 560/561/562 新发段，字段与 hs_a 完全一致、市值单位万元×1e4，排序分页同参数）——2026-11-13"新浪不支持 ETF 列表"结论据此更正
   - `q/view/newSinaHy.php`（行业板块）与 `newFLJK.php?param=class`（概念板块），GBK JS 赋值，无板块内涨跌家数
   - `hq.sinajs.cn` 的 s_ 指数接口：大盘监控备用源
   - `CN_MarketDataService.getKLineData` 日K（scale=240；2026-11-12 起 OHLCV 改为字符串返回，sinaKlineBar 用 flexF 兼容两种形态）；symbol 接受 sh510xxx/sz159xxx，ETF 日 K 可拉
@@ -214,4 +214,4 @@ config / model → （无内部依赖）
   - 板块代码命名：行业 `pt0180xxxx`、概念 `pt02GNxxxx`/`pt0210xxxx`，统一用 `pt` 前缀识别（`source.IsBoardSecid`）
   - 响应必须 `io.ReadAll`：单次 `Body.Read` 在 101 只批量（约 50KB）下因 TCP 分段只读到部分（实测只回 84/101）
 - **yfiua/index-constituents（GitHub Pages）**：纳斯达克100 成分表（101 只，月度更新，Symbol 为 Yahoo 风格）
-- 注：均为免费公开接口，无鉴权、无配额保证，仅用于学习研究；东财限流期四个东财独占接口（美股指数行情/活跃榜/日K、ETF 列表）优雅降级（占位提示/502/图表报错/列表加载失败），恢复后自动可用；A 股/ETF 分时图 2026-11-13 起走东财首选+腾讯兜底，东财限流期不再 502
+- 注：均为免费公开接口，无鉴权、无配额保证，仅用于学习研究；东财限流期东财独占接口（美股指数行情/活跃榜/日K）优雅降级（占位提示/502/图表报错），恢复后自动可用；ETF 列表自 2026-11-19 起新浪 etf_hq_fund 首选、东财兜底，东财限流期列表页不再单点失败；A 股/ETF 分时图 2026-11-13 起走东财首选+腾讯兜底，东财限流期不再 502

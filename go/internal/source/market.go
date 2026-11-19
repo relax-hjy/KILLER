@@ -103,6 +103,7 @@ func FetchBoards(ctx context.Context, kind, sort string) ([]model.Board, error) 
 			boards, err = fetchBoardsEM(ctx, kind, sort)
 		}
 		if err == nil {
+			MarkUsed(FeatBoards, src)
 			return sortBoards(boards, sort), nil
 		}
 		lastErr = err
@@ -166,11 +167,19 @@ func fetchBoardsEM(ctx context.Context, kind, sort string) ([]model.Board, error
 func FetchBoardMembers(ctx context.Context, secid string) ([]model.Stock, error) {
 	// 腾讯板块代码（pt 前缀）直接走腾讯
 	if IsBoardSecid(secid) {
-		return tencentBoardMembers(ctx, secid)
+		members, err := tencentBoardMembers(ctx, secid)
+		if err == nil {
+			MarkUsed(FeatBoards, SrcTencent)
+		}
+		return members, err
 	}
 	// 东财板块代码（90.BK 前缀）走东财
 	if strings.HasPrefix(secid, "90.BK") {
-		return fetchBoardMembersEM(ctx, secid)
+		members, err := fetchBoardMembersEM(ctx, secid)
+		if err == nil {
+			MarkUsed(FeatBoards, SrcEastmoney)
+		}
+		return members, err
 	}
 	return nil, fmt.Errorf("非法板块 secid: %s（应为 pt 前缀或 90.BKxxxx）", secid)
 }
@@ -217,6 +226,7 @@ func FetchStocks(ctx context.Context, page, pz int, sortFid string, asc bool) ([
 			stocks, total, err = fetchStocksEM(ctx, page, pz, sortFid, asc)
 		}
 		if err == nil {
+			MarkUsed(FeatStocks, src)
 			return stocks, total, nil
 		}
 		lastErr = err
@@ -307,9 +317,11 @@ func isAShareSecid(secid string) bool {
 // ---- A股 ETF ----
 
 // IsETFSecid 判断是否 A股 ETF secid（沪 1.5xxxxx / 深 0.159xxxx / 深 0.150xxxx 等）。
-// 沪市 ETF：510/511/512/513/515/516/517/518/563/588（6 位代码前 3 位）；
+// 沪市 ETF：510/511/512/513/515/516/517/518/560/561/562/563/588（6 位代码前 3 位）；
 //   510 宽基/512 行业/513 跨境/515 主题/516/517/518 商品/563 中证A50/588 科创
 //   511 为国债/政金债/信用债 ETF（2026-11-13 补，原遗漏导致债券 ETF 不在全市场列表）
+//   560/561/562 为 2023 年起沪市新发段（中证1000/机器人/半导体设备等 116 只，
+//   2026-11-19 新浪 etf_hq_fund 节点实测发现——原遗漏使东财列表同样过滤掉这批）
 // 深市 ETF：159/150/152。前端/后端可据此过滤掉 fs 拉到的非 ETF 基金（LOF/开放基金等）。
 func IsETFSecid(secid string) bool {
 	code := ""
@@ -326,30 +338,43 @@ func IsETFSecid(secid string) bool {
 	}
 	pre := code[:3]
 	switch pre {
-	case "510", "511", "512", "513", "515", "516", "517", "518", "563", "588", "159", "150", "152":
+	case "510", "511", "512", "513", "515", "516", "517", "518", "560", "561", "562", "563", "588", "159", "150", "152":
 		return true
 	}
 	return false
 }
 
-// FetchETFs 拉取沪深 ETF 分页列表（东财 clist，fs=m:1+t:19,m:0+t:13）。
-// 字段与个股共用 parseStock；sortFid 含义同 FetchStocks。
-// 返回 (etfs, total, err)。东财限流期会失败，前端按 stocks 页同样降级提示。
-// 注意 fs=m:0+t:13 包含深市全部基金（LOF/开放基金等），用 IsETFSecid 过滤后只留 ETF。
-// 2026-11-13 实测：东财 push2 限流期返回空，恢复后可用；ETF 行情走腾讯批量通吃。
+// FetchETFs 拉取沪深 ETF 分页列表，按路由顺序尝试（新浪 etf_hq_fund 首选、东财 clist 兜底）。
+// sortFid 含义同 FetchStocks；返回 (etfs, total, err)，首个成功源即返回并 MarkUsed。
+// 新浪节点字段与东财 parseStock 输出对齐（市值同为万元口径换算）。
+// 东财 fs=m:0+t:13 含深市全部基金（LOF/开放基金等），fetchETFsEM 内部用 IsETFSecid 过滤；
+// 新浪节点本身是 ETF 专项（2026-11-19 实测 927 只全在白名单），再过滤一次防混入。
 func FetchETFs(ctx context.Context, page, pz int, sortFid string, asc bool) ([]model.Stock, int, error) {
 	var lastErr error
 	for _, src := range pairFor(FeatETFs) {
 		var etfs []model.Stock
 		var total int
 		var err error
-		if src == SrcEastmoney {
+		switch src {
+		case SrcSina:
+			etfs, total, err = sinaETFs(ctx, page, pz, sortFid, asc)
+			if err == nil {
+				keep := make([]model.Stock, 0, len(etfs))
+				for _, e := range etfs {
+					if IsETFSecid(e.SecID) {
+						keep = append(keep, e)
+					}
+				}
+				etfs = keep
+			}
+		case SrcEastmoney:
 			etfs, total, err = fetchETFsEM(ctx, page, pz, sortFid, asc)
-		} else {
-			lastErr = fmt.Errorf("ETF 列表仅东财支持（限流期暂不可用）")
+		default:
+			lastErr = fmt.Errorf("数据源 %s 不支持 ETF 列表", src)
 			continue
 		}
 		if err == nil {
+			MarkUsed(FeatETFs, src)
 			return etfs, total, nil
 		}
 		lastErr = err
@@ -523,6 +548,7 @@ func FetchUSQuotes(ctx context.Context, secids []string) ([]model.Stock, error) 
 			quotes, err = fetchQuotesEM(ctx, secids)
 		}
 		if err == nil {
+			MarkUsed(FeatBatch, src)
 			return quotes, nil
 		}
 		lastErr = err

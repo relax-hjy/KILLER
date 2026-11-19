@@ -29,7 +29,7 @@ func TestTencentSymbolMapping(t *testing.T) {
 		{"100.NDX", "usNDX", true},
 		{"100.SPX", "usINX", true},
 		{"pt02003891", "pt02003891", true}, // 腾讯板块代码即 symbol
-		{"90.BK1128", "", false},          // 东财板块代码腾讯不支持
+		{"90.BK1128", "", false},           // 东财板块代码腾讯不支持
 	}
 	for _, c := range cases {
 		got, ok := tencentSymbol(c.secid)

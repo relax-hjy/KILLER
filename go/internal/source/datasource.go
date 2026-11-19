@@ -11,6 +11,9 @@ package source
 // 路由（routing）：每个功能可指定首选数据源，失败自动切另一支持源；
 // 仅单一来源的功能（分时/美股列表/成分表）锁定不可切换。
 // 路由状态存于内存（启动时由 config + DB 设置合并写入），运行期可被 API 热更新。
+//
+// 2026-11-19 调整：ETF 列表由东财独占改为新浪 etf_hq_fund 首选、东财兜底
+// （新浪节点实测 927 只沪深齐全，东财限流期列表页不再空；原"新浪无 ETF 列表"是节点名试错）。
 
 import (
 	"context"
@@ -60,10 +63,10 @@ type SourceMeta struct {
 }
 
 // Features 全部功能定义（顺序即看板展示顺序；Sources[0] 为默认首选）。
-// 默认路由原则（2026-11-13 板块彻底脱离东财后调整）：
+// 默认路由原则（2026-11-13 板块彻底脱离东财后调整；2026-11-19 ETF 列表脱离东财单点）：
 // 板块（列表/行情/成分股/走势）全部走腾讯 pt 代码，东财仅作兜底；
 // quotes 指数行情仍东财首选（指数 push2 可用性优于板块 push2）。
-// ETF 列表走东财 clist（限流期会失败，与 A股 stocks 同命运）；
+// ETF 列表走新浪 etf_hq_fund（东财 clist 兜底，限流期列表页不再失败）；
 // ETF 行情（监控固定列表）走批量行情路由（腾讯通吃 A股/美股/ETF）。
 var Features = []FeatureMeta{
 	{FeatQuotes, "大盘指数行情", []string{SrcEastmoney, SrcSina}},
@@ -73,7 +76,7 @@ var Features = []FeatureMeta{
 	{FeatKline, "日K线（前复权）", []string{SrcTencent, SrcEastmoney, SrcSina}},
 	{FeatBoards, "A股板块", []string{SrcTencent, SrcSina, SrcEastmoney}},
 	{FeatStocks, "A股个股列表", []string{SrcSina, SrcEastmoney}},
-	{FeatETFs, "A股 ETF 列表", []string{SrcEastmoney}},
+	{FeatETFs, "A股 ETF 列表", []string{SrcSina, SrcEastmoney}},
 	{FeatBatch, "批量行情（自选/纳指/美股板块/ETF）", []string{SrcTencent, SrcSina, SrcEastmoney}},
 	{FeatUSStocks, "美股成交活跃榜", []string{SrcEastmoney}},
 	{FeatNDXMember, "纳斯达克100成分表", []string{SrcYfiua}},
@@ -83,8 +86,8 @@ var Features = []FeatureMeta{
 var Sources = []SourceMeta{
 	{SrcEastmoney, "东方财富", "push2/push2his 行情接口（功能最全，2026-11-12 实测连接失败，降为兜底）",
 		[]string{FeatQuotes, FeatIntraday, FeatKline, FeatBoards, FeatStocks, FeatETFs, FeatBatch, FeatUSStocks}},
-	{SrcSina, "新浪财经", "hq/Market_Center/板块接口（GBK 编码，行情/日K/板块/列表首选）",
-		[]string{FeatQuotes, FeatKline, FeatBoards, FeatStocks, FeatBatch}},
+	{SrcSina, "新浪财经", "hq/Market_Center/板块接口（GBK 编码，行情/日K/板块/列表/ETF 列表首选）",
+		[]string{FeatQuotes, FeatKline, FeatBoards, FeatStocks, FeatETFs, FeatBatch}},
 	{SrcTencent, "腾讯财经", "qt.gtimg.cn/ifzq/proxy（批量行情+板块+成分股+分时/K线首选，A股/美股/ETF/板块通吃）",
 		[]string{FeatIntraday, FeatKline, FeatBatch, FeatBoards}},
 	{SrcYfiua, "GitHub Pages 成分表", "yfiua/index-constituents（纳指100成分，月度更新）",
@@ -194,6 +197,35 @@ func pairFor(feature string) []string {
 
 // PairFor 某功能的尝试顺序（首选 + 备选），web 层按此顺序降级。
 func PairFor(feature string) []string { return pairFor(feature) }
+
+// ---- 实际使用记录（前端"来源：XX"标注用）----
+
+var (
+	actualMu sync.RWMutex
+	actual   = map[string]string{} // feature → 最近一次成功取数实际使用的数据源
+)
+
+// MarkUsed 记录某功能最近一次成功取数实际使用的数据源（含兜底切换后的真源）。
+// 只接受该功能支持的数据源；重启后为空，前端回落到路由首选。
+func MarkUsed(feature, srcID string) {
+	if !sourceSupports(feature, srcID) {
+		return
+	}
+	actualMu.Lock()
+	actual[feature] = srcID
+	actualMu.Unlock()
+}
+
+// ActualSnapshot 返回各功能最近实际使用的数据源快照。
+func ActualSnapshot() map[string]string {
+	actualMu.RLock()
+	defer actualMu.RUnlock()
+	out := make(map[string]string, len(actual))
+	for k, v := range actual {
+		out[k] = v
+	}
+	return out
+}
 
 // ---- 连通性探测 ----
 

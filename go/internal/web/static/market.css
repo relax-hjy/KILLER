@@ -139,6 +139,8 @@ header h1 {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  /* 各页副标题文案长短不一，固定占位宽度使导航在切页时不左右跳动 */
+  min-width: 220px;
   font-size: 16px;
   font-weight: 660;
   letter-spacing: -0.02em;
@@ -222,6 +224,26 @@ footer {
 }
 .sec-title .hint { color: var(--text-tertiary); font-weight: 400; font-size: var(--font-meta); }
 .hint { color: var(--text-tertiary); font-size: var(--font-meta); }
+
+/* 数据来源标签：每个数据区块旁标注"来源：XX"（动态标签靠 data-feat 由 common.js 绘制） */
+.src-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  margin-left: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.src-tag:empty { display: none; }        /* 动态标签加载完成前不显示空壳 */
+.src-tag.local { border-style: dashed; } /* 本地生成（告警/账户/存档），区别于外部数据源 */
+.card .card-src { margin-top: 6px; line-height: 0; } /* 卡片内来源标签贴左 */
+.card .card-src .src-tag { margin-left: 0; line-height: 1.6; }
 
 /* ---------- 状态条（status-badge 模式） ---------- */
 .status {
@@ -527,6 +549,12 @@ tbody tr:last-child td { border-bottom: none; }
   background: rgba(255, 255, 255, 0.07);
   color: var(--text-secondary);
   border-color: var(--border-default);
+}
+/* 告警总开关关闭（monitoring.alert.enabled=false）时告警表标题的暂停徽章 */
+.badge.paused {
+  background: var(--warning-subtle);
+  color: var(--warning);
+  border-color: rgba(214, 168, 95, 0.24);
 }
 
 /* ---------- 板块热度条 ---------- */

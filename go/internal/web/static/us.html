@@ -27,6 +27,7 @@
       <button id="tabStock">美股个股</button>
     </div>
     <span class="hint">三大指数卡片常驻 · 板块与个股切换查看</span>
+    <span class="src-tag" data-feat="batch" title="三大指数与 SPDR 板块行情走批量行情路由"></span>
   </div>
 
   <!-- 一级 Tab A：板块走势 -->
@@ -37,6 +38,7 @@
         <button id="secAsc">领跌优先</button>
       </div>
       <span class="hint">SPDR 11 行业 ETF · 60 秒刷新</span>
+      <span class="src-tag" data-feat="batch"></span>
     </div>
     <div class="panel">
       <table>
@@ -69,6 +71,7 @@
           <option value="f6">按成交额</option>
           <option value="f3">按涨幅</option>
         </select>
+        <span class="src-tag" data-feat="us_stocks"></span>
       </div>
       <div class="panel">
         <table>
@@ -89,11 +92,12 @@
       <div class="toolbar">
         <input id="q" placeholder="筛选代码/名称（如 AAPL / 苹果）" style="width:260px">
         <select id="ndxSort">
+          <option value="cap_desc" selected>按总市值</option>
           <option value="pct_desc">按涨幅</option>
           <option value="pct_asc">按跌幅</option>
-          <option value="cap_desc">按总市值</option>
           <option value="code">按代码</option>
         </select>
+        <span class="src-tag" title="成分表来自 yfiua/index-constituents（GitHub Pages，月度更新）；表内行情走批量行情路由">来源：yfiua 成分表</span>
       </div>
       <div class="panel">
         <table>
@@ -118,12 +122,13 @@
   <div style="display:flex;gap:8px;margin-bottom:12px" class="tabs">
     <button id="dKline" class="on">日 K（250日）</button>
     <button id="dIntraday">当日分时</button>
+    <span id="dChartSrc" class="src-tag" data-feat="kline"></span>
   </div>
   <canvas id="dChart"></canvas>
   <div class="kpis" id="dKpis"></div>
 </div>
 
-<footer>数据来源：腾讯财经 / 新浪财经 / 东方财富 + yfiua/index-constituents（纳指100 成分表月度更新）· 仅供学习研究，不构成投资建议</footer>
+<footer>数据来源：腾讯财经 / 新浪财经 / 东方财富（指数与板块批量行情，按路由切换）· 东方财富（成交活跃榜）· yfiua/index-constituents（纳指100 成分表，月度更新）· 仅供学习研究，不构成投资建议</footer>
 
 <script src="/common.js"></script>
 <script>
@@ -135,7 +140,7 @@ const STATE = {
   pane: "sector",
   // 个股区
   activeTab: "active", usStocks: [], page: 1, sort: "f20", market: "", total: 0,
-  ndxStocks: [], ndxSort: "pct_desc", q: "",
+  ndxStocks: [], ndxSort: "cap_desc", q: "",
   // 详情抽屉
   detail: null, detailTab: "kline",
 };
@@ -322,6 +327,8 @@ async function loadDetailChart() {
   const s = STATE.detail;
   if (!s) return;
   const path = STATE.detailTab === "kline" ? "kline" : "intraday";
+  $("dChartSrc").dataset.feat = path; // 标签跟随图表 tab（与功能键同名）
+  paintSrcTags();
   try {
     const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=250" : ""}`);
     drawDetail(data);

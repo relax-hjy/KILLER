@@ -42,8 +42,11 @@ func (s *Server) startPositionWatch() {
 	log.Printf("[PositionWatch] 持仓盯盘已启动 (间隔=%s)", s.cfg.CheckInterval())
 }
 
-// positionWatchOnce 一轮盯盘：持仓价位比对 + 大盘环境比对。
+// positionWatchOnce 一轮盯盘：持仓价位比对 + 大盘环境比对（告警总开关关闭时整轮跳过）。
 func (s *Server) positionWatchOnce(ctx context.Context) {
+	if !s.cfg.Monitoring.Alert.Enabled {
+		return
+	}
 	s.checkPositionLevels(ctx)
 	s.checkRegimeAlert(ctx)
 }

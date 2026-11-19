@@ -25,11 +25,11 @@ import (
 )
 
 const (
-	tencentQuoteURL  = "https://qt.gtimg.cn/q=%s"
-	tencentKlineURL  = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,%d,qfq"
+	tencentQuoteURL    = "https://qt.gtimg.cn/q=%s"
+	tencentKlineURL    = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,%d,qfq"
 	tencentNewKlineURL = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get?param=%s,day,,,%d,qfq"
-	tencentMinuteURL = "https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=%s"
-	tencentUA        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+	tencentMinuteURL   = "https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=%s"
+	tencentUA          = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 )
 
 // tencentLineRe 匹配 `v_SYMBOL="字段串"` 行（美股代码含点号如 usBRK.B，港股指数含下划线如 hk_HSI）。

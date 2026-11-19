@@ -41,7 +41,7 @@
 <main>
   <!-- 自选区 -->
   <div class="panel">
-    <h2>自选监控 <span class="hint">（涨跌幅超阈值自动告警，随大盘巡检 60s 一轮）</span></h2>
+    <h2>自选监控 <span class="hint">（涨跌幅超阈值自动告警，随大盘巡检 60s 一轮）</span><span class="src-tag" data-feat="batch" title="自选行情走批量行情路由（腾讯首选）"></span></h2>
     <table>
       <thead>
         <tr>
@@ -64,11 +64,12 @@
       <option value="f12">按代码</option>
     </select>
     <span class="hint">点击行查看日K/分时详情 · 点★加/移出自选 · 30 秒刷新</span>
+    <span class="src-tag" data-feat="stocks"></span>
   </div>
 
   <!-- 全市场搜索结果（联想） -->
   <div class="panel" id="searchPanel" style="display:none">
-    <h2>全市场匹配 <span class="hint" id="searchHint"></span></h2>
+    <h2>全市场匹配 <span class="hint" id="searchHint"></span><span class="src-tag" title="联想匹配来自东方财富 searchapi，表内行情与全市场列表同源（批量行情路由）">来源：东方财富</span></h2>
     <table>
       <thead>
         <tr>
@@ -104,6 +105,7 @@
   <div style="display:flex;gap:8px;margin-bottom:12px" class="tabs">
     <button id="dKline" class="on">日 K（250日）</button>
     <button id="dIntraday">当日分时</button>
+    <span id="dChartSrc" class="src-tag" data-feat="kline"></span>
   </div>
   <canvas id="dChart"></canvas>
   <div class="kpis" id="dKpis"></div>
@@ -113,12 +115,13 @@
       <button id="dFinTab">财报摘要</button>
     </div>
     <span class="hold-period" id="dF10Meta"></span>
+    <span class="src-tag">来源：东方财富 F10</span>
   </div>
   <div id="dF10"><div class="hold-note">加载中 …</div></div>
   <div id="dFin" style="display:none"><div class="hold-note">加载中 …</div></div>
 </div>
 
-<footer>数据来源：新浪财经 / 东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+<footer>数据来源：新浪财经 / 东方财富（个股列表）· 腾讯财经 / 新浪财经 / 东方财富（行情与日K分时，按路由自动切换）· 东方财富（搜索联想、F10 主营财报）· 仅供学习研究，不构成投资建议</footer>
 
 <script src="/common.js"></script>
 <script>
@@ -302,6 +305,8 @@ async function loadDetailChart() {
   const s = STATE.detail;
   if (!s) return;
   const path = STATE.detailTab === "kline" ? "kline" : "intraday";
+  $("dChartSrc").dataset.feat = path; // 标签跟随图表 tab（与功能键同名）
+  paintSrcTags();
   try {
     const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=250" : ""}`);
     drawDetail(data);

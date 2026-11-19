@@ -29,6 +29,47 @@ async function getJSON(url) {
   return r.json();
 }
 
+/* ---------- 数据来源标注（"来源：XX"标签） ----------
+ * 静态标签：直接在 HTML 写 <span class="src-tag">来源：东方财富</span>（固定单源/本地产物）。
+ * 动态标签：写 <span class="src-tag" data-feat="kline"></span> 或用 srcTagHTML(feat)，
+ *   由 /api/datasources/active 绘制为"来源：实际使用的数据源"——actual 记录兜底切换后
+ *   的真源，与当前路由不同时 tooltip 说明"由 X 兜底提供"。加载完成前标签为空（CSS 隐藏）。
+ */
+let SRC_ACTIVE = null; // {names:{id:中文名}, routing:{feature:id}, actual:{feature:id}}
+
+async function loadSourceLabels() {
+  try { SRC_ACTIVE = await getJSON("/api/datasources/active"); } catch { return false; }
+  paintSrcTags();
+  return true;
+}
+
+// srcTagHTML 动态来源标签的 HTML 占位（渲染进卡片/表格后由 paintSrcTags 统一绘制）
+function srcTagHTML(feat) {
+  return `<span class="src-tag" data-feat="${feat}"></span>`;
+}
+
+function paintSrcTags() {
+  const a = SRC_ACTIVE;
+  document.querySelectorAll(".src-tag[data-feat]").forEach(el => {
+    const f = el.dataset.feat;
+    const id = a && (a.actual[f] || a.routing[f]);
+    if (!id) { el.textContent = ""; return; }
+    const name = (a.names && a.names[id]) || id;
+    el.textContent = "来源：" + name;
+    const rid = a.routing && a.routing[f];
+    const rname = rid && a.names ? (a.names[rid] || rid) : "";
+    el.title = rid && rid !== id
+      ? `当前路由 ${rname}，实际由 ${name} 兜底提供`
+      : `该数据来自 ${name}`;
+  });
+}
+loadSourceLabels();
+setInterval(async () => {
+  // 未加载到（首次失败）则重试；已加载则重拉一次以跟进实际来源变化，再统一绘制
+  if (!SRC_ACTIVE) await loadSourceLabels();
+  else { try { SRC_ACTIVE = await getJSON("/api/datasources/active"); } catch {} paintSrcTags(); }
+}, 10000);
+
 let _toastTimer;
 function toast(msg) {
   let t = $("toast");

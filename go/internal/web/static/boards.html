@@ -24,6 +24,7 @@
   <section id="watchSec" style="display:none">
     <h2 class="sec-title">板块监控
       <span class="hint">（config.yaml boards 配置 · 与大盘监控页同步）</span>
+      <span class="src-tag" data-feat="boards"></span>
     </h2>
     <div class="cards" id="watchCards"></div>
   </section>
@@ -40,6 +41,7 @@
       <button id="sortAsc">领跌优先</button>
     </div>
     <span class="hint">60 秒自动刷新</span>
+    <span class="src-tag" data-feat="boards"></span>
   </div>
 
   <div class="panel">
@@ -79,7 +81,7 @@
   <div id="bdNote" style="margin-top:10px;font-size:12px;color:var(--muted)"></div>
 </div>
 
-<footer>数据来源：新浪财经 / 东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+<footer>数据来源：腾讯财经（板块列表/行情/成分股）· 新浪财经 / 东方财富（兜底自动切换）· 权重为本地近似计算 · 仅供学习研究，不构成投资建议</footer>
 
 <script src="/common.js"></script>
 <script>
@@ -126,7 +128,10 @@ async function loadWatch() {
 /* ---------- 成分股抽屉：选股范围 + 权重 ---------- */
 async function openBoard(secid, name) {
   $("detail").classList.add("open");
-  $("bdName").textContent = name || secid;
+  const h = $("bdName");
+  h.textContent = name || secid;
+  h.insertAdjacentHTML("beforeend", srcTagHTML("boards"));
+  paintSrcTags();
   $("bdSub").textContent = "成分股加载中 …";
   $("bdNote").textContent = "";
   $("bdBody").innerHTML = `<tr><td colspan="8" class="loading">加载中 …</td></tr>`;

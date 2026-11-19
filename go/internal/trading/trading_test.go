@@ -87,3 +87,54 @@ func TestSharpe(t *testing.T) {
 		t.Errorf("单调上升曲线夏普应>0, got %v", sharpe)
 	}
 }
+
+func TestMACD(t *testing.T) {
+	// 持续下跌后突然大涨：DIF 应上穿 DEA（金叉）
+	closes := make([]float64, 60)
+	for i := 0; i < 55; i++ {
+		closes[i] = 100 - float64(i) // 下跌
+	}
+	for i := 55; i < 60; i++ {
+		closes[i] = closes[54] + float64(i-54)*8 // 暴涨
+	}
+	// 暴涨段内应出现金叉买点（交叉发生在中途，末根已是多头排列）
+	bought := false
+	for i := 55; i < 60; i++ {
+		if a, _, _ := macdSignal(closes[:i+1], 12, 26, 9); a == "buy" {
+			bought = true
+			break
+		}
+	}
+	if !bought {
+		t.Error("下跌后暴涨段内 MACD 应出现金叉→buy")
+	}
+	if a, reason, _ := macdSignal(closes, 12, 26, 9); a == "hold" && reason == "" {
+		t.Error("信号应带理由")
+	}
+
+	// 数据不足
+	if a, _, _ := macdSignal(closes[:20], 12, 26, 9); a != "hold" {
+		t.Errorf("数据不足应→hold, got %s", a)
+	}
+}
+
+func TestStrategyRegistry(t *testing.T) {
+	// 注册表包含全部内置策略且可取到信号函数
+	for _, name := range Strategies {
+		if signalFunc(name) == nil {
+			t.Errorf("策略 %s 未注册信号函数", name)
+		}
+		if StrategyName(name) == name && name != "" {
+			t.Errorf("策略 %s 缺中文名", name)
+		}
+	}
+	if len(Strategies) < 4 {
+		t.Errorf("内置策略应≥4（含 MACD）, got %v", Strategies)
+	}
+	if p := DefaultParams("macd"); p.Short != 12 || p.Long != 26 || p.Period != 9 {
+		t.Errorf("macd 默认参数应 12/26/9, got %+v", p)
+	}
+	if signalFunc("no_such") != nil {
+		t.Error("未注册策略应返回 nil")
+	}
+}

@@ -11,15 +11,15 @@ type Quote struct {
 	SecID      string    `json:"secid"`
 	Code       string    `json:"code"`
 	Name       string    `json:"name"`
-	Price      float64   `json:"price"`       // 最新点位
-	Change     float64   `json:"change"`      // 涨跌点数
-	Pct        float64   `json:"pct"`         // 涨跌幅（%）
+	Price      float64   `json:"price"`  // 最新点位
+	Change     float64   `json:"change"` // 涨跌点数
+	Pct        float64   `json:"pct"`    // 涨跌幅（%）
 	Open       float64   `json:"open"`
 	High       float64   `json:"high"`
 	Low        float64   `json:"low"`
 	PrevClose  float64   `json:"prev_close"`
-	Amplitude  float64   `json:"amplitude"`   // 当日振幅（%）
-	Volume     float64   `json:"volume"`      // 成交额（元）
+	Amplitude  float64   `json:"amplitude"` // 当日振幅（%）
+	Volume     float64   `json:"volume"`    // 成交额（元）
 	UpdateTime time.Time `json:"update_time"`
 }
 
@@ -35,13 +35,13 @@ type Kline struct {
 
 // Alert 一条告警记录。
 type Alert struct {
-	ID         int64     `json:"id"`
-	SecID      string    `json:"secid"`
-	Name       string    `json:"name"`
-	Type       string    `json:"type"` // change_up | change_down | amplitude
-	Value      float64   `json:"value"`      // 触发值（%）
-	Threshold  float64   `json:"threshold"`  // 阈值（%）
-	Price      float64   `json:"price"`      // 触发时点位
+	ID          int64     `json:"id"`
+	SecID       string    `json:"secid"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`      // change_up | change_down | amplitude
+	Value       float64   `json:"value"`     // 触发值（%）
+	Threshold   float64   `json:"threshold"` // 阈值（%）
+	Price       float64   `json:"price"`     // 触发时点位
 	TriggeredAt time.Time `json:"triggered_at"`
 }
 

@@ -73,7 +73,7 @@
 <main>
   <!-- 观察列表 -->
   <section>
-    <h2 class="sec-title">分析观察列表 <span class="hint">五个分析系统加权研判 · 分组来自 config.yaml analysis.groups</span></h2>
+    <h2 class="sec-title">分析观察列表 <span class="hint">五个分析系统加权研判 · 分组来自 config.yaml analysis.groups</span><span class="src-tag local" title="评分与建议由本地分析模型基于 250 根日K和实时行情计算；行情与日K来自腾讯/新浪/东财按路由自动切换">来源：本地模型</span></h2>
     <div class="tabs lv1" id="grpTabs" style="margin-bottom:12px"></div>
     <div class="toolbar">
       <span class="note" id="wlMeta">加载中 …</span>
@@ -92,7 +92,7 @@
 
   <!-- 综合研判详情 -->
   <section style="margin-top:20px">
-    <h2 class="sec-title">综合研判 <span class="hint">点击上表任意一行切换标的</span></h2>
+    <h2 class="sec-title">综合研判 <span class="hint">点击上表任意一行切换标的</span><span class="src-tag local" title="本地分析模型自动生成（现价与参考位所依据的行情来自批量行情与日K路由）">来源：本地模型</span></h2>
     <div class="panel" id="asmPanel">
       <div class="empty" style="padding:28px">等待选择标的</div>
     </div>
@@ -100,14 +100,14 @@
 
   <!-- 分析日报存档（存储分组：每标的每交易日一份） -->
   <section style="margin-top:20px">
-    <h2 class="sec-title">分析日报存档 <span class="hint">每只标的每个交易日各存一份 · 点击日期回看当日结论</span></h2>
+    <h2 class="sec-title">分析日报存档 <span class="hint">每只标的每个交易日各存一份 · 点击日期回看当日结论</span><span class="src-tag local" title="盘后由本地服务收盘补档写入 SQLite，重启不丢">来源：本地存档</span></h2>
     <div class="panel">
       <div class="arch-wrap" id="archBar"><span class="arch-note">等待选择标的</span></div>
     </div>
   </section>
   <!-- 评分回测（滚动重算：验证这套评分到底有没有预测力） -->
   <section style="margin-top:20px">
-    <h2 class="sec-title">评分回测 <span class="hint">组内标的逐日滚动重算评分（只用截至当日的数据），看各评分档的未来收益</span></h2>
+    <h2 class="sec-title">评分回测 <span class="hint">组内标的逐日滚动重算评分（只用截至当日的数据），看各评分档的未来收益</span><span class="src-tag local" title="本地按历史日K滚动重算与统计，不调用外部接口">来源：本地回测</span></h2>
     <div class="panel">
       <div class="arch-wrap">
         <button class="btn" id="btnRoll">对当前分组跑回测</button>
@@ -128,7 +128,7 @@
   </section>
 </main>
 
-<footer>数据来源：新浪财经 / 东方财富 / 腾讯财经（免费公开接口）· 分析结论由技术指标模型自动生成，仅供学习研究，不构成投资建议</footer>
+<footer>数据来源：行情与日K（腾讯财经 / 新浪财经 / 东方财富，按路由自动切换）· 分析结论与日报存档由本地模型生成 · 仅供学习研究，不构成投资建议</footer>
 
 <script src="/common.js"></script>
 <script>

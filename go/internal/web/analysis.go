@@ -98,7 +98,7 @@ func (s *Server) assess(ctx context.Context, secid, name string) (*analysis.Asse
 
 // regimeResult 市场环境结论。
 type regimeResult struct {
-	Label  string  `json:"label"`  // 强势 / 中性 / 弱势
+	Label  string  `json:"label"` // 强势 / 中性 / 弱势
 	Reason string  `json:"reason"`
 	Score  float64 `json:"score"` // 0-100
 }
@@ -456,7 +456,7 @@ func (s *Server) handleAnalysis(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	a = gatedCopy(a)                            // 闸门在副本上改，别污染 90 秒共享缓存
+	a = gatedCopy(a)                   // 闸门在副本上改，别污染 90 秒共享缓存
 	s.applyQualityGate(r.Context(), a) // 明细页才拉 F10 上质量闸门（批量不拉，避免撞东财限流）
 	writeJSON(w, a)
 }
@@ -589,11 +589,11 @@ func calibrate(evals []analysis.RollEval) map[string]any {
 	}
 	outEx := excessAbove(out, bestT)
 	return map[string]any{
-		"threshold":           bestT,
-		"in_sample_excess_5d": round2f(bestEx),
+		"threshold":            bestT,
+		"in_sample_excess_5d":  round2f(bestEx),
 		"out_sample_excess_5d": round2f(outEx),
-		"reliable":            outEx > 0,
-		"note":                "建议阈值 = 评分 ≥ 该值后 5 日超额收益转正的分界；后 30% 样本验证为正才可信，仅供参考不自动改模型",
+		"reliable":             outEx > 0,
+		"note":                 "建议阈值 = 评分 ≥ 该值后 5 日超额收益转正的分界；后 30% 样本验证为正才可信，仅供参考不自动改模型",
 	}
 }
 

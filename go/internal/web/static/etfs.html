@@ -62,13 +62,13 @@
 
 <main>
   <!-- 监控卡片（config.yaml etfs 段固定列表，看门狗每轮巡检带告警） -->
-  <div class="sec-title">自监控 ETF <span class="hint">（config.yaml 固定列表，涨跌幅超 etf_change_pct 自动告警，随大盘巡检 60s 一轮）</span></div>
+  <div class="sec-title">自监控 ETF <span class="hint">（config.yaml 固定列表，涨跌幅超 etf_change_pct 自动告警，随大盘巡检 60s 一轮）</span><span class="src-tag" data-feat="batch"></span></div>
   <div class="cards" id="watchCards">
     <div class="card"><div class="name"><span>加载中 …</span></div></div>
   </div>
 
   <!-- 市场 ETF 组合（config.yaml etf_groups 段，按类别分组，纯看盘不告警） -->
-  <div class="sec-title">市场 ETF 组合 <span class="hint">（按类别分组的市场热门 ETF，点击卡片看详情，10 秒刷新）</span></div>
+  <div class="sec-title">市场 ETF 组合 <span class="hint">（按类别分组的市场热门 ETF，点击卡片看详情，10 秒刷新）</span><span class="src-tag" data-feat="batch"></span></div>
   <div id="groupArea">
     <div class="card"><div class="name"><span>加载中 …</span></div></div>
   </div>
@@ -84,7 +84,8 @@
       <option value="f20">按总市值</option>
       <option value="f12">按代码</option>
     </select>
-    <span class="hint">点击行查看日K/分时详情 · 30 秒刷新 · 东财限流期列表会加载失败</span>
+    <span class="hint">点击行查看日K/分时详情 · 30 秒刷新 · 列表新浪首选、东财兜底</span>
+    <span class="src-tag" data-feat="etfs"></span>
   </div>
 
   <div class="panel">
@@ -112,22 +113,25 @@
   <div style="display:flex;gap:8px;margin-bottom:12px" class="tabs">
     <button id="dKline" class="on">日 K（250日）</button>
     <button id="dIntraday">当日分时</button>
+    <span id="dChartSrc" class="src-tag" data-feat="kline"></span>
   </div>
   <canvas id="dChart"></canvas>
   <div class="kpis" id="dKpis"></div>
   <div class="hold-head">
     <span class="hold-title">综合研判</span>
+    <span class="src-tag local" title="本地分析模型基于 250 根日K与实时行情自动计算，与分析页同一套模型">来源：本地模型</span>
     <span class="hold-period" id="dAsmMeta"></span>
   </div>
   <div id="dAsm"><div class="hold-note">分析加载中 …</div></div>
   <div class="hold-head">
     <span class="hold-title">成分股（前十大重仓）</span>
+    <span class="src-tag" title="天天基金 F10 jjcc 接口，最新披露期前十大重仓">来源：东方财富·天天基金</span>
     <span class="hold-period" id="dHoldPeriod"></span>
   </div>
   <div id="dHoldings"><div class="hold-note">加载中 …</div></div>
 </div>
 
-<footer>数据来源：腾讯财经 / 新浪财经 / 东方财富（免费公开接口）· 仅供学习研究，不构成投资建议</footer>
+<footer>数据来源：腾讯财经（批量行情与日K分时首选）· 新浪财经 / 东方财富（全市场 ETF 列表，首选新浪）· 东方财富·天天基金（成分股）· 综合研判为本地模型生成 · 仅供学习研究，不构成投资建议</footer>
 
 <script src="/common.js"></script>
 <script>
@@ -347,6 +351,8 @@ async function loadDetailChart() {
   const s = STATE.detail;
   if (!s) return;
   const path = STATE.detailTab === "kline" ? "kline" : "intraday";
+  $("dChartSrc").dataset.feat = path; // 标签跟随图表 tab（与功能键同名）
+  paintSrcTags();
   try {
     const data = await getJSON(`/api/${path}?secid=${encodeURIComponent(s.secid)}${path === "kline" ? "&limit=250" : ""}`);
     drawDetail(data);

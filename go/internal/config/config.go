@@ -26,6 +26,7 @@ type ETFGroup struct {
 
 // AlertConfig 告警阈值配置。
 type AlertConfig struct {
+	Enabled        bool    `yaml:"enabled"`          // 告警总开关：false 时暂停全部告警（阈值/自选/持仓盯盘），行情轮询与快照不受影响
 	ChangePct      float64 `yaml:"change_pct"`       // 指数涨跌幅阈值（%）
 	AmplitudePct   float64 `yaml:"amplitude_pct"`    // 当日振幅阈值（%）
 	BoardChangePct float64 `yaml:"board_change_pct"` // 板块涨跌幅阈值（%），<=0 时沿用 change_pct
@@ -48,6 +49,7 @@ type TradingConfig struct {
 	MinCommission  float64 `yaml:"min_commission"`  // 最低佣金（元）
 	StampTaxRate   float64 `yaml:"stamp_tax_rate"`  // 印花税（仅卖出，如 0.0005）
 	Enabled        bool    `yaml:"enabled"`         // 是否启用交易系统
+	Mode           string  `yaml:"mode"`            // 交易通道：sim（默认，模拟撮合）| live（实盘，需券商 API 已接入）
 	// 交易指导的仓位约束（% 与股）：单票上限、总仓位上限、A股整手股数
 	SinglePositionPct float64 `yaml:"single_position_pct"`
 	MaxPositionPct    float64 `yaml:"max_position_pct"`
@@ -185,7 +187,7 @@ func Default() *Config {
 	c.Monitoring = MonitoringConfig{
 		CheckIntervalSec: 60,
 		TradingHoursOnly: true,
-		Alert:            AlertConfig{ChangePct: 1.0, AmplitudePct: 1.5, BoardChangePct: 2.0, EtfChangePct: 2.0, CooldownMin: 30},
+		Alert:            AlertConfig{Enabled: true, ChangePct: 1.0, AmplitudePct: 1.5, BoardChangePct: 2.0, EtfChangePct: 2.0, CooldownMin: 30},
 	}
 	c.Trading = TradingConfig{
 		DataDir:           `D:\CloudDriver\EVO\killer`,
@@ -194,6 +196,7 @@ func Default() *Config {
 		MinCommission:     5,
 		StampTaxRate:      0.0005,
 		Enabled:           true,
+		Mode:              "sim",
 		SinglePositionPct: 30,
 		MaxPositionPct:    80,
 		LotSize:           100,

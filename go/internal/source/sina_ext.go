@@ -4,6 +4,7 @@ package source
 // 2026-11-11 实测通过的接口：
 //   - A股列表: money.finance.sina.com.cn Market_Center.getHQNodeData（UTF-8 JSON）
 //   - A股总数: Market_Center.getHQNodeStockCount
+//   - 全市场 ETF 列表: 同接口 node=etf_hq_fund（2026-11-19 实测，节点计数 938/实返 927）
 //   - 行业板块: vip.stock.finance.sina.com.cn q/view/newSinaHy.php（GBK JS 赋值）
 //   - 概念板块: vip.stock.finance.sina.com.cn q/view/newFLJK.php?param=class（GBK JS 赋值）
 //   - 行情批查: hq.sinajs.cn/list=sh600519,gb_aapl（GBK，个股与美股混排）
@@ -31,8 +32,8 @@ import (
 var hqRe = regexp.MustCompile(`hq_str_([a-zA-Z0-9_.]+)="([^"]*)"`)
 
 const (
-	sinaStockListURL  = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=%d&num=%d&sort=%s&asc=%d&node=hs_a&symbol="
-	sinaStockCountURL = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeStockCount?node=hs_a"
+	sinaNodeListURL   = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=%d&num=%d&sort=%s&asc=%d&node=%s&symbol="
+	sinaNodeCountURL  = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeStockCount?node=%s"
 	sinaIndustryURL   = "https://vip.stock.finance.sina.com.cn/q/view/newSinaHy.php"
 	sinaConceptURL    = "https://vip.stock.finance.sina.com.cn/q/view/newFLJK.php?param=class"
 	sinaHQURL         = "https://hq.sinajs.cn/list="
@@ -93,6 +94,19 @@ func (x *flexF) UnmarshalJSON(b []byte) error {
 
 // sinaStocks 新浪 A 股列表（沪深 5300+，含排序）。
 func sinaStocks(ctx context.Context, page, pz int, sortFid string, asc bool) ([]model.Stock, int, error) {
+	return sinaNodeStocks(ctx, "hs_a", page, pz, sortFid, asc)
+}
+
+// sinaETFs 新浪全市场 ETF 列表（etf_hq_fund 节点）。
+// 2026-11-19 实测：节点计数 938、列表实返 927（未上市/停牌等不返回），沪 559 深 368，
+// 字段与 hs_a 完全一致（现价/涨跌幅/成交额/换手率/总市值[万元]），排序分页参数同源。
+// 此前"新浪无 ETF 列表"的结论是节点名试错所致（etf_fund/fund_etf 返回空，正确名 etf_hq_fund）。
+func sinaETFs(ctx context.Context, page, pz int, sortFid string, asc bool) ([]model.Stock, int, error) {
+	return sinaNodeStocks(ctx, "etf_hq_fund", page, pz, sortFid, asc)
+}
+
+// sinaNodeStocks Market_Center 通用节点列表。node: hs_a=A股 / etf_hq_fund=全市场 ETF。
+func sinaNodeStocks(ctx context.Context, node string, page, pz int, sortFid string, asc bool) ([]model.Stock, int, error) {
 	sortMap := map[string]string{
 		"f3": "changepercent", "f6": "amount", "f8": "turnoverratio",
 		"f20": "mktcap", "f21": "nmc", "f9": "per", "f12": "symbol",
@@ -105,11 +119,34 @@ func sinaStocks(ctx context.Context, page, pz int, sortFid string, asc bool) ([]
 	if asc {
 		a = 1
 	}
-	url := fmt.Sprintf(sinaStockListURL, page, pz, s, a)
+	url := fmt.Sprintf(sinaNodeListURL, page, pz, s, a, node)
 	body, err := sinaGet(ctx, url)
 	if err != nil {
 		return nil, 0, err
 	}
+	out, err := parseSinaNodeStocks(body)
+	if err != nil {
+		return nil, 0, err
+	}
+	// 总数（失败则用估算）
+	total := 0
+	if b2, err := sinaGet(ctx, fmt.Sprintf(sinaNodeCountURL, node)); err == nil {
+		var s2 string
+		if json.Unmarshal(b2, &s2) == nil {
+			total, _ = strconv.Atoi(s2)
+		}
+	}
+	if total == 0 {
+		total = (page-1)*pz + len(out)
+		if len(out) == pz {
+			total += 1 // 还有下一页
+		}
+	}
+	return out, total, nil
+}
+
+// parseSinaNodeStocks 解析 getHQNodeData 的 JSON 数组为 Stock 列表（单测直接喂响应样本）。
+func parseSinaNodeStocks(body []byte) ([]model.Stock, error) {
 	var rows []struct {
 		Symbol        string `json:"symbol"`
 		Code          string `json:"code"`
@@ -128,7 +165,7 @@ func sinaStocks(ctx context.Context, page, pz int, sortFid string, asc bool) ([]
 		Mktcap        flexF  `json:"mktcap"`
 	}
 	if err := json.Unmarshal(body, &rows); err != nil {
-		return nil, 0, fmt.Errorf("sina 列表解析失败: %w", err)
+		return nil, fmt.Errorf("sina 列表解析失败: %w", err)
 	}
 	now := time.Now()
 	out := make([]model.Stock, 0, len(rows))
@@ -145,23 +182,9 @@ func sinaStocks(ctx context.Context, page, pz int, sortFid string, asc bool) ([]
 		})
 	}
 	if len(out) == 0 {
-		return nil, 0, fmt.Errorf("sina 列表返回空")
+		return nil, fmt.Errorf("sina 列表返回空")
 	}
-	// 总数（失败则用估算）
-	total := 0
-	if b2, err := sinaGet(ctx, sinaStockCountURL); err == nil {
-		var s2 string
-		if json.Unmarshal(b2, &s2) == nil {
-			total, _ = strconv.Atoi(s2)
-		}
-	}
-	if total == 0 {
-		total = (page-1)*pz + len(out)
-		if len(out) == pz {
-			total += 1 // 还有下一页
-		}
-	}
-	return out, total, nil
+	return out, nil
 }
 
 // sinaSymbolToSecid sh600519→1.600519 / sz000001→0.000001 / bj→0.

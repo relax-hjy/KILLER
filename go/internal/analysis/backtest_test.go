@@ -12,8 +12,8 @@ func synthKlines(n int, start, pct float64) []model.Kline {
 	px := start
 	for i := 0; i < n; i++ {
 		out = append(out, model.Kline{
-			Date:   dateOf(i),
-			Open:   px, Close: px, High: px * 1.005, Low: px * 0.995,
+			Date: dateOf(i),
+			Open: px, Close: px, High: px * 1.005, Low: px * 0.995,
 			Volume: 1000,
 		})
 		px *= 1 + pct/100
@@ -78,12 +78,12 @@ func TestAggregate(t *testing.T) {
 		return RollEval{Score: score, Advice: adviceOf(score), Ret: [3]float64{r5}, Valid: [3]bool{ok}}
 	}
 	evals := []RollEval{
-		mk(90, 10, true),  // ≥80：+10
-		mk(85, -2, true),  // ≥80：-2
-		mk(70, 6, true),   // 65-80：+6
-		mk(40, -4, true),  // 35-50：-4
-		mk(30, 4, true),   // <35：+4
-		mk(32, 1, false),  // <35 但无未来数据：不计入均值/胜率，只计入评估次数
+		mk(90, 10, true), // ≥80：+10
+		mk(85, -2, true), // ≥80：-2
+		mk(70, 6, true),  // 65-80：+6
+		mk(40, -4, true), // 35-50：-4
+		mk(30, 4, true),  // <35：+4
+		mk(32, 1, false), // <35 但无未来数据：不计入均值/胜率，只计入评估次数
 	}
 	got := Aggregate(evals)
 	if len(got) != 4 {
@@ -96,7 +96,7 @@ func TestAggregate(t *testing.T) {
 	if got[0].Count != 2 || got[0].N[0] != 2 {
 		t.Errorf("≥80 样本统计错误: %+v", got[0])
 	}
-	if want := (10-2)/2.0; got[0].Avg[0] != want {
+	if want := (10 - 2) / 2.0; got[0].Avg[0] != want {
 		t.Errorf("≥80 平均收益=%.2f, want %.2f", got[0].Avg[0], want)
 	}
 	if want := 50.0; got[0].Win[0] != want {

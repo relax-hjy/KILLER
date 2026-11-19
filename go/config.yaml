@@ -174,6 +174,7 @@ monitoring:
   check_interval_seconds: 60  # 轮询间隔（秒）
   trading_hours_only: true    # 仅在交易时段告警（含集合竞价，北京时间）
   alert:
+    enabled: false             # 告警总开关：false = 暂停全部告警（阈值/自选/持仓盯盘），行情轮询与快照落库照常
     change_pct: 1.0           # 指数涨跌幅超过 ±1% 告警
     amplitude_pct: 1.5        # 当日振幅超过 1.5% 告警
     board_change_pct: 2.0     # 板块涨跌幅超过 ±2% 告警（板块波动大于指数，单独设阈值）
@@ -183,6 +184,7 @@ monitoring:
 # --- 模拟交易系统 ---
 trading:
   enabled: true                 # 是否启用交易系统
+  mode: sim                     # 交易通道：sim=模拟撮合（默认）| live=实盘（需券商量化 API 已接入，未接入时下单会被拒绝）
   data_dir: "D:\\CloudDriver\\EVO\\killer"  # 交易数据持久化目录（网盘同步）
   initial_cash: 20000           # 期初现金（元）；账户无任何交易活动时会按此值重新对齐
   commission_rate: 0.00025      # 佣金费率（双边，万2.5）

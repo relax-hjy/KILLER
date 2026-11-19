@@ -9,11 +9,11 @@ import (
 // TestDowngradeAdvice 弱市降档只按买入类，回避不再降。
 func TestDowngradeAdvice(t *testing.T) {
 	cases := map[string]string{
-		"可积极买入":          "可以买入",
-		"可以买入":           "观望，回踩支撑再介入",
+		"可积极买入":      "可以买入",
+		"可以买入":       "观望，回踩支撑再介入",
 		"观望，回踩支撑再介入": "偏弱，暂缓买入",
-		"偏弱，暂缓买入":       "回避",
-		"回避":             "回避",
+		"偏弱，暂缓买入":    "回避",
+		"回避":         "回避",
 	}
 	for in, want := range cases {
 		if got := downgradeAdvice(in); got != want {

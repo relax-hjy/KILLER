@@ -23,7 +23,7 @@ import (
 
 // ETF 持仓披露期标签（如 "2026年3季度股票投资明细"）。
 type ETFHoldings struct {
-	Period string         `json:"period"`
+	Period string          `json:"period"`
 	Items  []model.Holding `json:"items"`
 }
 

@@ -5,6 +5,7 @@ package web
 //   POST /api/datasources/test   测试连接：空 body 全测，{"id":x} 单测
 //   GET  /api/datasources/routing        当前功能路由
 //   POST /api/datasources/routing       更新路由 {routing:{feature:source}}（校验+持久化+热生效）
+//   GET  /api/datasources/active         来源标注用：名称 + 路由 + 实际使用源（免探测，各页轻量轮询）
 
 import (
 	"encoding/json"
@@ -64,9 +65,25 @@ func (s *Server) dataSourcePayload(status map[string]source.ProbeResult) map[str
 	}
 }
 
+// handleActiveSources GET /api/datasources/active — 前端"来源：XX"标签数据。
+// 与 /api/datasources 的区别：不触发连通性探测，只返回名称/路由/实际使用源，可高频调用。
+// actual 记录最近一次成功取数的真实数据源（兜底切换后与 routing 不同），重启后为空。
+func (s *Server) handleActiveSources(w http.ResponseWriter, r *http.Request) {
+	names := make(map[string]string, len(source.Sources))
+	for _, src := range source.Sources {
+		names[src.ID] = src.Name
+	}
+	writeJSON(w, map[string]any{
+		"names":   names,
+		"routing": source.RoutingSnapshot(),
+		"actual":  source.ActualSnapshot(),
+	})
+}
+
 // handleDataSourceTest POST /api/datasources/test — 测试连接按钮。
 //   - 无 body（或空 body）：探测全部数据源
 //   - {"id":"eastmoney"}：只探测指定数据源，其余状态保持不变
+//
 // 两种情况都返回与 GET 相同的完整结构，前端可直接整体替换渲染。
 func (s *Server) handleDataSourceTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

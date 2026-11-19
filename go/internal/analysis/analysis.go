@@ -29,20 +29,20 @@ const (
 
 // SubScore 单个分析系统内的子项得分（供"分析详情"展开看分数从哪来）。
 type SubScore struct {
-	Name string  `json:"name"` // 子项名（如 均线排列）
+	Name  string  `json:"name"`  // 子项名（如 均线排列）
 	Score float64 `json:"score"` // 该子项贡献的分值（可正可负）
-	Note string  `json:"note"` // 当前读数说明（如 多头排列 / 年线缺失）
+	Note  string  `json:"note"`  // 当前读数说明（如 多头排列 / 年线缺失）
 }
 
 // Finding 单个分析系统的结论。
 type Finding struct {
-	Analyzer string      `json:"analyzer"` // 英文名
-	Title    string      `json:"title"`    // 中文名
-	Score    float64     `json:"score"`    // -100（极度看空）~ +100（极度看多）
-	Verdict  string      `json:"verdict"`  // 偏多 / 中性 / 偏空
-	Detail   string      `json:"detail"`   // 关键数值
-	Reason   string      `json:"reason"`   // 结论说明
-	Subs     []SubScore  `json:"subs"`     // 子项得分（合计 = Score）
+	Analyzer string     `json:"analyzer"` // 英文名
+	Title    string     `json:"title"`    // 中文名
+	Score    float64    `json:"score"`    // -100（极度看空）~ +100（极度看多）
+	Verdict  string     `json:"verdict"`  // 偏多 / 中性 / 偏空
+	Detail   string     `json:"detail"`   // 关键数值
+	Reason   string     `json:"reason"`   // 结论说明
+	Subs     []SubScore `json:"subs"`     // 子项得分（合计 = Score）
 }
 
 // Assessment 综合研判结论。
