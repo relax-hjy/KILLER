@@ -194,10 +194,10 @@
   <!-- 持仓 -->
   <div id="secPos" style="display:none">
     <div class="panel">
-      <h2>当前持仓 <span class="hint">成本与数量为本地账户数据 · 现价随批量行情刷新</span><span class="src-tag local" title="持仓与成本来自本地模拟账户（SQLite）；现价来自批量行情路由（腾讯首选）">来源：本地账户 + 批量行情</span></h2>
+      <h2>当前持仓 <span class="hint">成本与数量为本地账户数据 · 现价随批量行情刷新 · 点「设置」可改持仓量与成本价</span><span class="src-tag local" title="持仓与成本来自本地模拟账户（SQLite）；现价来自批量行情路由（腾讯首选）">来源：本地账户 + 批量行情</span></h2>
       <table>
-        <thead><tr><th>代码</th><th>名称</th><th>持仓量</th><th>成本价</th><th>现价</th><th>市值</th><th>浮动盈亏</th><th>盈亏率</th></tr></thead>
-        <tbody id="posBody"><tr><td colspan="8" class="loading">加载中 …</td></tr></tbody>
+        <thead><tr><th>代码</th><th>名称</th><th>持仓量</th><th>成本价</th><th>现价</th><th>市值</th><th>浮动盈亏</th><th>盈亏率</th><th class="nosort">操作</th></tr></thead>
+        <tbody id="posBody"><tr><td colspan="9" class="loading">加载中 …</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -346,7 +346,7 @@ async function cancelOrder(id) {
 async function loadPositions() {
   try {
     const pos = await getJSON("/api/trade/positions");
-    $("posBody").innerHTML = pos.map(p => `<tr>
+    $("posBody").innerHTML = pos.map(p => `<tr data-secid="${p.secid}" data-code="${p.code}" data-name="${p.name}" data-qty="${p.quantity}" data-cost="${p.avg_cost}">
       <td>${p.code}</td>
       <td>${p.name}</td>
       <td class="num">${p.quantity}</td>
@@ -355,9 +355,84 @@ async function loadPositions() {
       <td class="num">${fmtMoney(p.market_value)}</td>
       <td class="${p.profit >= 0 ? "up" : "down"}">${p.profit >= 0 ? "+" : ""}${fmtMoney(p.profit)}</td>
       <td class="${p.profit_pct >= 0 ? "up" : "down"}">${p.profit_pct >= 0 ? "+" : ""}${p.profit_pct.toFixed(2)}%</td>
-    </tr>`).join("") || `<tr><td colspan="8" class="empty">暂无持仓</td></tr>`;
+      <td><button class="btn small" data-act="setpos" title="设置持仓量与成本价">设置</button></td>
+    </tr>`).join("") || `<tr><td colspan="9" class="empty">暂无持仓 — <button class="btn small" data-act="addpos">添加持仓</button>（登记账户外已有的真实持仓）</td></tr>`;
   } catch (e) {
-    $("posBody").innerHTML = `<tr><td colspan="8" class="empty">加载失败：${e.message}</td></tr>`;
+    $("posBody").innerHTML = `<tr><td colspan="9" class="empty">加载失败：${e.message}</td></tr>`;
+  }
+}
+
+/* ---------- 持仓设置：行内改数量/成本，复用期初导入接口（覆盖式，不动现金不生成成交） ---------- */
+$("posBody").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const tr = btn.closest("tr");
+  // 一次只开一行编辑（保存/取消作用于当前编辑行，放行）
+  if ($("posBody").querySelector("tr[data-editing]") && !["savepos", "cancelpos", "addsave"].includes(act)) return;
+  const txt = (id, ph, w) =>
+    `<input id="${id}" placeholder="${ph}" style="padding:4px 8px;width:${w}px">`;
+  const num = (id, ph, val, min, step, w) =>
+    `<input id="${id}" type="number" min="${min}" step="${step}" placeholder="${ph}" value="${val ?? ""}" style="padding:4px 8px;width:${w}px">`;
+
+  if (act === "setpos") {
+    tr.dataset.editing = "1";
+    tr.innerHTML = `
+      <td>${tr.dataset.code}</td>
+      <td>${tr.dataset.name}</td>
+      <td class="num">${num("posQty", "", tr.dataset.qty, 1, 1, 96)}</td>
+      <td class="num">${num("posCost", "", tr.dataset.cost, 0.001, 0.001, 96)}</td>
+      <td colspan="4" style="color:var(--muted);font-size:12px">保存将覆盖持仓量与成本价（不动现金、不生成成交）</td>
+      <td><button class="btn small" data-act="savepos">保存</button> <button class="btn small" data-act="cancelpos">取消</button></td>`;
+    $("posQty").focus();
+    return;
+  }
+  if (act === "addpos") {
+    tr.dataset.editing = "1";
+    tr.innerHTML = `
+      <td>${txt("posSecid", "secid 如 0.000568", 130)}</td>
+      <td>${txt("posCode", "代码 000568", 92)}</td>
+      <td>${txt("posName", "名称 泸州老窖", 110)}</td>
+      <td class="num">${num("posQty", "数量", "", 1, 1, 96)}</td>
+      <td class="num">${num("posCost", "成本价", "", 0.001, 0.001, 96)}</td>
+      <td colspan="2" style="color:var(--muted);font-size:12px">登记账户外持仓：不动现金、不生成成交</td>
+      <td><button class="btn small" data-act="addsave">保存</button> <button class="btn small" data-act="cancelpos">取消</button></td>
+      <td></td>`;
+    $("posSecid").focus();
+    return;
+  }
+  if (act === "cancelpos") { loadPositions(); return; }
+  if (act === "savepos") {
+    const qty = parseInt($("posQty").value, 10);
+    const cost = parseFloat($("posCost").value);
+    if (!qty || qty <= 0) { toast("请输入有效持仓量"); return; }
+    if (!cost || cost <= 0) { toast("请输入有效成本价"); return; }
+    await setPosition(tr.dataset.secid, tr.dataset.code, tr.dataset.name, qty, cost);
+    return;
+  }
+  if (act === "addsave") {
+    const secid = $("posSecid").value.trim();
+    const qty = parseInt($("posQty").value, 10);
+    const cost = parseFloat($("posCost").value);
+    if (!secid) { toast("请输入 secid（如 0.000568）"); return; }
+    if (!qty || qty <= 0) { toast("请输入有效数量"); return; }
+    if (!cost || cost <= 0) { toast("请输入有效成本价"); return; }
+    await setPosition(secid, $("posCode").value.trim(), $("posName").value.trim(), qty, cost);
+  }
+});
+
+// setPosition 覆盖式设置某标的的持仓量与成本价（与期初持仓导入同一接口）
+async function setPosition(secid, code, name, qty, cost) {
+  try {
+    const resp = await fetch("/api/trade/positions/import", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secid, code, name, quantity: qty, avg_cost: cost }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    toast(`已设置 ${name || secid}：${qty} @ ${fmtPrice(cost)}`);
+    loadAccount(); loadPositions(); loadGuidance();
+  } catch (e) {
+    toast("设置失败：" + e.message);
   }
 }
 
